@@ -1,0 +1,8 @@
+:root { --guinda: #9F2241; --dorado: #BC955C; }
+body { font-family: 'Arial', sans-serif; margin: 0; background: #f4f4f4; }
+.header-oficial { background: white; border-bottom: 3px solid var(--dorado); padding: 20px 40px; position: relative; }
+.pleca-guinda { height: 10px; background: var(--guinda); width: 100%; position: absolute; top: 0; left: 0; }
+.texto-logos .st { font-weight: bold; color: var(--guinda); font-size: 1.3em; }
+.texto-logos .censia { font-weight: bold; color: #333; font-size: 1em; }
+.card { background: white; padding: 40px; border-radius: 8px; text-align: center; border-top: 5px solid var(--guinda); width: 550px; margin: 50px auto; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+.btn-principal { background: var(--guinda); color: white; border: none; padding: 15px 40px; border-radius: 4px; cursor: pointer; font-weight: bold; }
