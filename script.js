@@ -141,21 +141,11 @@ async function generarPDF() {
         // Llamamos a la función que creamos para descargar la info
         const datosBD = await obtenerDatosDesdeGoogle();
         
-        try {
-            // 2. OBTENER DATOS DE LA BASE DE DATOS (Google Sheets)
-            const datosBD = await obtenerDatosDesdeGoogle();
-            
-            // ¡NUEVO SEGURO DE VIDA! Si la descarga falló, detenemos todo aquí y no mostramos el error rojo
-            if (!datosBD) {
-                if(btn) btn.innerText = "Generar Reporte por Fecha";
-                return; 
+        // ¡NUEVO SEGURO DE VIDA! Si la descarga falló, detenemos todo aquí y no mostramos el error rojo
+        if (!datosBD) {
+            if(btn) btn.innerText = "Generar Reporte por Fecha";
+            return; 
         }
-        
-        // Separamos los datos en las variables que tu código ya conoce
-        const datosPacientes = datosBD.datosCenso;
-        const datosVacunas = datosBD.datosVacunas;
-
-        if(btn) btn.innerText = "Procesando reporte...";
         
         // Separamos los datos en las variables que tu código ya conoce
         const datosPacientes = datosBD.datosCenso;
