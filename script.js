@@ -89,7 +89,7 @@ const normalizarFecha = (f) => {
 //}
 
 // --- NUEVO CONECTOR A GOOGLE SHEETS ---
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzkQq4qseUqDSGsNvf7d1EcsE6qh0yNFZz5JGE9nLGkBpeCRdSZckAvDlk1P5GLGVZEiw/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxfum6mtT6HxmGx9M2hamY2eA6Ruk_YeYD4uXu-9h4kUZ65m2H8VDTenpPPLhb0G6tK/exec';
 
 async function obtenerDatosDesdeGoogle() {
     try {
