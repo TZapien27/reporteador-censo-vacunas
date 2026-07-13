@@ -84,14 +84,9 @@ const normalizarFecha = (f) => {
     return `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${anio}`;
 };
 
-//function leerArchivoCSV(file) {
-//    return new Promise((resolve, reject) => Papa.parse(file, { header: true, skipEmptyLines: true, complete: res => resolve(res.data), error: err => reject(err) }));
-//}
-
-// --- NUEVO CONECTOR A GOOGLE SHEETS ---
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxfum6mtT6HxmGx9M2hamY2eA6Ruk_YeYD4uXu-9h4kUZ65m2H8VDTenpPPLhb0G6tK/exec';
 
-async function obtenerDatosDesdeGoogle() {
+/*async function obtenerDatosDesdeGoogle() {
     try {
         console.log("Iniciando descarga de datos desde Google Sheets...");
         
@@ -112,6 +107,26 @@ async function obtenerDatosDesdeGoogle() {
     } catch (error) {
         console.error("Fallo al obtener los datos:", error);
         alert("Hubo un error al descargar la base de datos.");
+    }
+} */
+async function obtenerDatosDesdeGoogle() {
+    try {
+        console.log("Iniciando descarga de datos desde Google Sheets...");
+        
+        // La petición DEBE ir completamente limpia, sin headers ni modes raros.
+        const response = await fetch(APPS_SCRIPT_URL);
+        
+        if (!response.ok) {
+            throw new Error(`Error de red: ${response.status}`);
+        }
+
+        const datos = await response.json();
+        console.log("Datos descargados correctamente");
+        return datos;
+
+    } catch (error) {
+        console.error("Fallo al obtener los datos:", error);
+        return null; // Devuelve null para que el "seguro de vida" atrape el error
     }
 }
 
