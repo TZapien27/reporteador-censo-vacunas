@@ -138,7 +138,6 @@ async function generarPDF() {
 
     try {
         // 2. OBTENER DATOS DE LA BASE DE DATOS (Google Sheets)
-        // Llamamos a la función que creamos para descargar la info
         const datosBD = await obtenerDatosDesdeGoogle();
         
         // ¡NUEVO SEGURO DE VIDA! Si la descarga falló, detenemos todo aquí y no mostramos el error rojo
