@@ -162,8 +162,8 @@ async function generarPDF() {
         }
         
         // Separamos los datos en las variables que tu código ya conoce
-        const datosPacientes = datosBD.datosCenso;
-        const datosVacunas = datosBD.datosVacunas;
+        const datosPacientes = datosBD.censo;
+        const datosVacunas = datosBD.historial_vacunas;
 
         if(btn) btn.innerText = "Procesando reporte...";
 
