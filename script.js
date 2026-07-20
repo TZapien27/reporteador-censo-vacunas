@@ -84,7 +84,7 @@ const normalizarFecha = (f) => {
     return `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${anio}`;
 };
 
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzkQq4qseUqDSGsNvf7d1EcsE6qh0yNFZz5JGE9nLGkBpeCRdSZckAvDlk1P5GLGVZEiw/exec';
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzfi-uRNPy4RD5KWVng9kTgjOWWKpq0EmPQAVyqqTyrTz6_9TjFPFPxhfi5q_tG1iLO/exec';
 
 /*async function obtenerDatosDesdeGoogle() {
     try {
