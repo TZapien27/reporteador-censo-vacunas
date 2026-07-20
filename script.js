@@ -155,19 +155,36 @@ async function generarPDF() {
         // 2. OBTENER DATOS DE LA BASE DE DATOS (Google Sheets)
         const datosBD = await obtenerDatosDesdeGoogle();
         
-        // ¡NUEVO SEGURO DE VIDA! Si la descarga falló, detenemos todo aquí y no mostramos el error rojo
+        // --- INYECCIÓN DE DIAGNÓSTICO ---
+        console.log("Paquete íntegro recibido desde Google:", datosBD);
+        
         if (!datosBD) {
             if(btn) btn.innerText = "Generar Reporte por Fecha";
             return; 
         }
+
+        // Interceptar errores nativos emitidos desde el backend (Apps Script)
+        if (datosBD.error) {
+            alert("Error devuelto por la Base de Datos: " + datosBD.error);
+            if(btn) btn.innerText = "Generar Reporte por Fecha";
+            return;
+        }
         
-        // Separamos los datos en las variables que tu código ya conoce
+        // Extracción estricta de propiedades usando las llaves exactas del JSON actual
         const datosPacientes = datosBD.censo;
         const datosVacunas = datosBD.historial_vacunas;
 
+        // Blindaje de tipo: Validar que el parseo devolvió un Array antes de ejecutar .filter()
+        if (!Array.isArray(datosPacientes)) {
+            console.error("El objeto 'censo' no es un arreglo válido. Contenido recibido:", datosPacientes);
+            alert("Fallo estructural: Los datos del censo no llegaron correctamente.");
+            if(btn) btn.innerText = "Generar Reporte por Fecha";
+            return;
+        }
+
         if(btn) btn.innerText = "Procesando reporte...";
 
-        // 3. LÓGICA DE NEGOCIO (Totalmente intacta)
+        // 3. LÓGICA DE NEGOCIO (Preservada intacta para el mapeo relacional)
         const pacientesJornada = datosPacientes.filter(f => normalizarFecha(buscarDato(f, "fecha de la actividad")) === fechaBusqueda);
         
         if (pacientesJornada.length === 0) { 
@@ -238,6 +255,7 @@ async function generarPDF() {
         if(btn) btn.innerText = "Generar Reporte por Fecha";
     }
 }
+
 // 4. DIBUJADO DE ANEXOS
 function procesarAnexo(tipo, datos, fechaBusqueda) {
     const { jsPDF } = window.jspdf;
