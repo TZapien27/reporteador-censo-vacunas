@@ -15,13 +15,61 @@
         </div>
     </header>
 
-    <div class="card">
-        <h2>Reporte Diario de Vacunación</h2>
-        
-        <button class="btn-principal" onclick="generarPDF()">Generar Reporte por Fecha</button>
+    <!-- MÓDULO DE AUTENTICACIÓN (Requerimiento 4) -->
+    <div id="seccion-login" class="auth-container">
+        <h2>Acceso Restringido</h2>
+        <p style="font-size: 0.9em; color: #666; margin-bottom: 20px;">Identifícate para generar reportes</p>
+        <input type="text" id="login-usuario" placeholder="Usuario">
+        <input type="password" id="login-password" placeholder="Contraseña">
+        <select id="login-institucion">
+            <option value="">-- Selecciona Institución --</option>
+            <option value="SSA">Secretaría de Salud (SSA)</option>
+            <option value="IMSS">IMSS / IMSS Bienestar</option>
+            <option value="ISSSTE">ISSSTE</option>
+            <option value="OTRA">Otra Institución</option>
+        </select>
+        <button class="btn-principal" onclick="validarAcceso()">Ingresar al Sistema</button>
     </div>
-        
-        <button class="btn-principal" onclick="generarPDF()">Generar Reporte por Fecha</button>
+
+    <!-- DASHBOARD DE FILTROS (Requerimientos 1 y 3) -->
+    <div id="seccion-dashboard" class="oculto" style="padding: 20px;">
+        <div class="filtros-panel">
+            <div class="filtro-grupo">
+                <label>Tipo de Reporte</label>
+                <select id="filtro-tipo">
+                    <option value="censo">Censo Vacunal (Anexos 1A, 1B, 1C)</option>
+                    <option value="informe">Informe Final de Actividad (Resumen)</option>
+                    <option value="bloqueo">Acciones en Bloqueo Vacunal</option>
+                </select>
+            </div>
+            <div class="filtro-grupo">
+                <label>Institución</label>
+                <input type="text" id="filtro-institucion" readonly style="background: #e9ecef; font-weight: bold; color: #555;">
+            </div>
+            <div class="filtro-grupo">
+                <label>Vacunador</label>
+                <select id="filtro-vacunador"><option value="">-- Todos --</option></select>
+            </div>
+            <div class="filtro-grupo">
+                <label>Registrador</label>
+                <select id="filtro-registrador"><option value="">-- Todos --</option></select>
+            </div>
+            <div class="filtro-grupo">
+                <label>Nombre del Caso / Identificador</label>
+                <input type="text" id="filtro-caso" placeholder="Ej. Caso Sospechoso X">
+            </div>
+            <div class="filtro-grupo">
+                <label>Fecha Inicial / Única</label>
+                <input type="date" id="filtro-fecha-inicio">
+            </div>
+            <div class="filtro-grupo">
+                <label>Fecha Final (Opcional para Rangos)</label>
+                <input type="date" id="filtro-fecha-fin">
+            </div>
+            <div class="panel-acciones">
+                <button class="btn-principal" onclick="ejecutarGeneracionPorFiltros()">Generar Reporte Seleccionado</button>
+            </div>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
