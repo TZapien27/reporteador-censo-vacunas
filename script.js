@@ -435,61 +435,36 @@ function generarInformeActividad(datosUnificados, fInit, fEnd) {
 }
 
 // ==========================================
-// 6. NUEVO REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL (Req 2)
+// 6. NUEVO REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL
 // ==========================================
 function generarAccionesBloqueo(unificados, fInit, fEnd) {
+    // 1. CÁLCULO DE VIVIENDAS Y BRIGADAS
     const casasVisitadas = unificados.length; 
     let famAus = 0, casaDes = 0, famRen = 0, lotBal = 0, negocios = 0, cSosp = 0, cProb = 0;
     const brigadasSet = new Set();
 
     unificados.forEach(p => {
-        let edadAnios = parseEdadEnAnios(buscarDato(p, "edad"));
-        let bk = "";
-        
-        if (edadAnios < 1) bk = "menores 1 @"; 
-        else if (edadAnios <= 4) bk = "1-4 @"; 
-        else if (edadAnios <= 9) bk = "5-9 @"; 
-        else if (edadAnios <= 12) bk = "10-12 @"; 
-        else if (edadAnios <= 14) bk = "13-14 @"; 
-        else if (edadAnios <= 24) bk = "15-24 @"; 
-        else if (edadAnios <= 39) bk = "25-39 @"; 
-        else if (edadAnios <= 44) bk = "40-44 @"; 
-        else if (edadAnios <= 64) bk = "45-64 @"; 
-        else bk = "65 y más";
+        let dom = String(buscarDato(p, "domicilio visitado")).toLowerCase(); 
+        let caso = String(buscarDato(p, "caso en domicilio")).toLowerCase();
 
-        matriz[bk].t++;
-        let sx = parseSexo(buscarDato(p, "sexo"));
-        if (sx === "M") matriz[bk].m++; else if (sx === "F") matriz[bk].f++;
+        if (dom === 'a' || dom.includes('ausente')) famAus++;
+        if (dom === 'r' || dom.includes('renuente')) famRen++;
+        if (dom.includes('deshabitada')) casaDes++;
+        if (dom.includes('baldio') || dom.includes('baldío')) lotBal++;
+        if (dom.includes('negocio')) negocios++;
 
-        let cartilla = false;
-        // Fecha de actividad específica de ESTE paciente (vital si no hay fecha global)
-        let fechaActividadPaciente = normalizarFecha(buscarDato(p, "fecha de la actividad"));
+        if (caso.includes('sospechoso')) cSosp++;
+        if (caso.includes('probable')) cProb++;
 
-        p._historialVacunas.forEach(v => {
-            let fV = normalizarFecha(buscarDato(v, "fecha_ingresada"));
-            let nV = String(buscarDato(v, "vacuna_aplicada")).toUpperCase();
-            
-            // Si la vacuna es estrictamente anterior a la visita de este paciente, es un antecedente
-            if (fV !== "" && (fV < fechaActividadPaciente)) {
-                cartilla = true; 
-            }
-            
-            // Si la vacuna se aplicó exactamente el mismo día que se registró la visita (Bloqueo)
-            if (fV !== "" && fV === fechaActividadPaciente) { 
-                if (nV.includes("SRP") && edadAnios < 10) matriz[bk].srp++;
-                if (nV.includes("SR") && !nV.includes("SRP") && edadAnios >= 10) matriz[bk].sr++;
-            }
-        });
-        
-        if (cartilla) matriz[bk].cA++; else matriz[bk].sA++;
+        let reg = buscarDato(p, "registrador_nombre");
+        let vac = buscarDato(p, "nombre de vacunador");
+        let casoN = buscarDato(p, "nombre del caso") || "Brote_ND";
+        brigadasSet.add(`${casoN}_${reg}_${vac}`);
     });
-
-    // UBICACIÓN: script.js -> dentro de generarAccionesBloqueo()
-    // ... [código anterior que cuenta casos y brigadas] ...
 
     const familiasEntrevistadas = casasVisitadas - (famAus + casaDes + famRen + lotBal + negocios);
     
-    // 1. DECLARACIÓN E INICIALIZACIÓN OBLIGATORIA (Debe ir antes del forEach)
+    // 2. DECLARACIÓN DE LA MATRIZ (ESTRICTAMENTE ANTES DE LLENARLA)
     const matriz = {
         "menores 1 @": { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
         "1-4 @":       { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
@@ -503,7 +478,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         "65 y más":    { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 }
     };
 
-    // 2. ASIGNACIÓN MATEMÁTICA (Ahora es seguro manipular la 'matriz')
+    // 3. POBLADO MATEMÁTICO DE LA MATRIZ Y CRUCE DE VACUNAS
     unificados.forEach(p => {
         let edadAnios = parseEdadEnAnios(buscarDato(p, "edad"));
         let bk = "";
@@ -543,7 +518,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         if (cartilla) matriz[bk].cA++; else matriz[bk].sA++;
     });
 
-    // 3. RENDERIZADO VISUAL
+    // 4. RENDERIZADO VISUAL DEL REPORTE (PDF)
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('l', 'pt', 'letter');
     const pW = doc.internal.pageSize.width;
@@ -557,7 +532,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     doc.text(`FECHA / RANGO: ${textoRango}`, 40, 50);
     doc.text(`BRIGADAS ACTIVAS: ${brigadasSet.size || 1}`, 40, 65);
     
-    // Tabla Operativa Superior
+    // AutoTable Superior (Operativo)
     doc.autoTable({
         startY: 75, margin: { left: 40 }, tableWidth: 300,
         body: [
@@ -568,7 +543,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         theme: 'grid', styles: { fontSize: 7 }
     });
 
-    // Renderizado Matriz Inferior
+    // AutoTable Inferior (Matriz Encuestada)
     let keys = Object.keys(matriz);
     let sTot=0, sMasc=0, sFem=0, sCa=0, sSa=0, sSrp=0, sSr=0, sDos=0;
     let sumProv=0, sumEnc=0, sumFin=0;
