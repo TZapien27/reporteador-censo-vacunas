@@ -110,63 +110,80 @@ function buscarFechaVacuna(filasVacunas, keyVacuna) {
 // 3. ENRUTADOR PRINCIPAL DE GENERACIÓN
 async function ejecutarGeneracionPorFiltros() {
     const btn = document.querySelector(".panel-acciones .btn-principal");
-    const tipoRep = document.getElementById("filtro-tipo").value;
-    const fInit = document.getElementById("filtro-fecha-inicio").value;
-    let fEnd = document.getElementById("filtro-fecha-fin").value;
-
-    // LÓGICA DE FLEXIBILIZACIÓN DE FECHAS: 
-    // Solo exige fecha si NO es el reporte de Bloqueo.
-    if (!fInit && tipoRep !== "bloqueo") {
-        return alert("❌ Seleccione Fecha Inicial para este tipo de reporte.");
-    }
-    if (!fEnd && fInit) fEnd = fInit; 
-
-    const vac = document.getElementById("filtro-vacunador").value;
-    const reg = document.getElementById("filtro-registrador").value;
-    const caso = document.getElementById("filtro-caso").value.toLowerCase();
-    const instSeleccionada = document.getElementById("filtro-institucion").value;
     
-    btn.innerText = "Procesando Datos...";
-    
-    const datosBD = await obtenerDatosDesdeGoogle();
-    if (!datosBD || !datosBD.censo) { alert("Error de BD"); btn.innerText = "Generar Reporte Seleccionado"; return; }
+    // 1. INICIO DEL ESCUDO DE EXCEPCIONES
+    try {
+        const tipoRep = document.getElementById("filtro-tipo").value;
+        const fInit = document.getElementById("filtro-fecha-inicio").value;
+        let fEnd = document.getElementById("filtro-fecha-fin").value;
 
-    const pacientesFiltrados = datosBD.censo.filter(p => {
-        let fAct = normalizarFecha(buscarDato(p, "fecha de la actividad"));
-        let instReg = String(buscarDato(p, "registrador_institucion")).toUpperCase(); 
+        // Validar fechas excepto para bloqueos
+        if (!fInit && tipoRep !== "bloqueo") {
+            alert("❌ Seleccione Fecha Inicial para este tipo de reporte.");
+            return;
+        }
+        if (!fEnd && fInit) fEnd = fInit; 
 
-        // Si fInit está vacío (permitido en bloqueos), el match de fecha es universalmente verdadero
-        let matchFecha = true;
-        if (fInit) {
-            matchFecha = (fAct >= fInit && fAct <= fEnd);
+        const vac = document.getElementById("filtro-vacunador").value;
+        const reg = document.getElementById("filtro-registrador").value;
+        const caso = document.getElementById("filtro-caso").value.toLowerCase();
+        const instSeleccionada = document.getElementById("filtro-institucion").value;
+        
+        btn.innerText = "Procesando Datos...";
+        
+        const datosBD = await obtenerDatosDesdeGoogle();
+        
+        // 2. VALIDACIÓN ESTRICTA DE RESPUESTA DE GOOGLE
+        if (!datosBD) throw new Error("No se recibió respuesta del servidor de Google Apps Script.");
+        if (datosBD.error) throw new Error("Error interno del servidor: " + datosBD.error);
+        
+        // 3. BLINDAJE DE ARREGLOS (Previene que un 'undefined' mate el código)
+        const censoSeguro = datosBD.censo || [];
+        const vacunasSeguras = datosBD.historial_vacunas || [];
+        
+        if (censoSeguro.length === 0) throw new Error("La hoja de Censo está vacía o no se pudo leer correctamente.");
+
+        const pacientesFiltrados = censoSeguro.filter(p => {
+            let fAct = normalizarFecha(buscarDato(p, "fecha de la actividad"));
+            let instReg = String(buscarDato(p, "registrador_institucion")).toUpperCase(); 
+
+            let matchFecha = true;
+            if (fInit) matchFecha = (fAct >= fInit && fAct <= fEnd);
+
+            let matchVac = vac ? (buscarDato(p, "nombre de vacunador").includes(vac)) : true; 
+            let matchReg = reg ? (buscarDato(p, "registrador_nombre").includes(reg)) : true; 
+            let matchCaso = caso ? (buscarDato(p, "nombre del caso").toLowerCase().includes(caso)) : true; 
+            let matchInst = (instSeleccionada === "TODAS" || tipoRep === "bloqueo") ? true : instReg.includes(instSeleccionada); 
+
+            return matchFecha && matchVac && matchReg && matchCaso && matchInst;
+        });
+
+        if (pacientesFiltrados.length === 0) {
+            alert("⚠️ No hay registros que coincidan con los filtros seleccionados.");
+            btn.innerText = "Generar Reporte Seleccionado";
+            return;
         }
 
-        let matchVac = vac ? (buscarDato(p, "nombre de vacunador").includes(vac)) : true; 
-        let matchReg = reg ? (buscarDato(p, "registrador_nombre").includes(reg)) : true; 
-        let matchCaso = caso ? (buscarDato(p, "nombre del caso").toLowerCase().includes(caso)) : true; 
-        
-        // LÓGICA DE EXCLUSIÓN INSTITUCIONAL:
-        // Si el reporte es Bloqueo, la validación de institución devuelve true automáticamente.
-        let matchInst = (instSeleccionada === "TODAS" || tipoRep === "bloqueo") ? true : instReg.includes(instSeleccionada); 
+        // 4. CRUCE RELACIONAL BLINDADO
+        const datosUnificados = pacientesFiltrados.map(p => ({
+            ...p, 
+            _historialVacunas: vacunasSeguras.filter(v => buscarDato(v, "id_paciente") == buscarDato(p, "id")) 
+        }));
 
-        return matchFecha && matchVac && matchReg && matchCaso && matchInst;
-    });
+        // 5. LLAMADA A RENDERIZADO
+        if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
+        else if (tipoRep === "informe") generarInformeActividad(datosUnificados, fInit, fEnd);
+        else if (tipoRep === "bloqueo") generarAccionesBloqueo(datosUnificados, fInit, fEnd);
 
-    if (pacientesFiltrados.length === 0) {
-        alert("⚠️ No hay registros que coincidan con los filtros seleccionados.");
+        // Restaurar estado del botón si todo fue un éxito
         btn.innerText = "Generar Reporte Seleccionado";
-        return;
+
+    } catch (error) {
+        // 6. MANEJO DEL ERROR: Informa al usuario y libera la interfaz
+        console.error("Fallo crítico detectado en el hilo de ejecución:", error);
+        alert("Ocurrió un error durante el procesamiento:\n" + error.message);
+        btn.innerText = "Generar Reporte Seleccionado";
     }
-
-    const datosUnificados = pacientesFiltrados.map(p => ({
-        ...p, _historialVacunas: datosBD.historial_vacunas.filter(v => buscarDato(v, "id_paciente") == buscarDato(p, "id")) 
-    }));
-
-    if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
-    else if (tipoRep === "informe") generarInformeActividad(datosUnificados, fInit, fEnd);
-    else if (tipoRep === "bloqueo") generarAccionesBloqueo(datosUnificados, fInit, fEnd);
-
-    btn.innerText = "Generar Reporte Seleccionado";
 }
 
 // 4. GENERACIÓN DE ANEXOS 1-A, 1-B, 1-C
