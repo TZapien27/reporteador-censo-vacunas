@@ -63,7 +63,26 @@ const normalizarFecha = (f) => {
     if (partes.length !== 3) return soloFecha;
     let dia = parseInt(partes[0], 10), mes = parseInt(partes[1], 10), anio = parseInt(partes[2], 10);
     if (anio < 100) anio += 2000;
-    return `${anio}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`; // Estandarizado YYYY-MM-DD para filtrado fácil
+    return `${anio}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`; 
+};
+
+// Convierte "10 años, 7 meses" o "11 meses" a un entero utilizable matemáticamente
+const parseEdadEnAnios = (edadStr) => {
+    if (!edadStr) return 0;
+    let str = String(edadStr).toLowerCase();
+    if (str.includes("año") || str.includes("ano")) {
+        let match = str.match(/(\d+)\s*(año|ano)/);
+        return match ? parseInt(match[1]) : 0;
+    }
+    return 0; // Si solo dice "meses", tiene 0 años cumplidos.
+};
+
+// Convierte "H/M" de la BD al formato del reporte
+const parseSexo = (sexoStr) => {
+    let s = String(sexoStr).trim().toUpperCase();
+    if (s === "H" || s === "HOMBRE") return "M"; // Masculino
+    if (s === "M" || s === "MUJER") return "F"; // Femenino
+    return "";
 };
 
 const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyjKIXoNE6wV7hj77IMfeJF2-8gOPE68DDsJsEGBCeoqA7azHL4laZ48oIpWFLPY3mW0w/exec';
@@ -95,35 +114,41 @@ async function ejecutarGeneracionPorFiltros() {
     const fInit = document.getElementById("filtro-fecha-inicio").value;
     let fEnd = document.getElementById("filtro-fecha-fin").value;
     if (!fInit) return alert("❌ Seleccione Fecha Inicial.");
-    if (!fEnd) fEnd = fInit; // Si no hay fecha fin, asume mismo día
+    if (!fEnd) fEnd = fInit; 
 
     const vac = document.getElementById("filtro-vacunador").value;
     const reg = document.getElementById("filtro-registrador").value;
     const caso = document.getElementById("filtro-caso").value.toLowerCase();
+    const instSeleccionada = document.getElementById("filtro-institucion").value;
     
     btn.innerText = "Procesando Datos...";
     
     const datosBD = await obtenerDatosDesdeGoogle();
     if (!datosBD || !datosBD.censo) { alert("Error de BD"); btn.innerText = "Generar Reporte Seleccionado"; return; }
 
-    // FILTRADO MAESTRO
+    // FILTRADO MAESTRO REFORZADO CON LLAVES EXACTAS
     const pacientesFiltrados = datosBD.censo.filter(p => {
         let fAct = normalizarFecha(buscarDato(p, "fecha de la actividad"));
+        let instReg = String(buscarDato(p, "registrador_institucion")).toUpperCase(); // Llave exacta 10
+
         let matchFecha = (fAct >= fInit && fAct <= fEnd);
-        let matchVac = vac ? (buscarDato(p, "nombre_vacunador").includes(vac)) : true;
-        let matchReg = reg ? (buscarDato(p, "registrador_nombre").includes(reg)) : true;
-        let matchCaso = caso ? (JSON.stringify(p).toLowerCase().includes(caso)) : true;
-        return matchFecha && matchVac && matchReg && matchCaso;
+        let matchVac = vac ? (buscarDato(p, "nombre de vacunador").includes(vac)) : true; // Llave exacta 11
+        let matchReg = reg ? (buscarDato(p, "registrador_nombre").includes(reg)) : true; // Llave exacta 12
+        let matchCaso = caso ? (buscarDato(p, "nombre del caso").toLowerCase().includes(caso)) : true; // Llave exacta 17
+        let matchInst = (instSeleccionada === "TODAS") ? true : instReg.includes(instSeleccionada); 
+
+        return matchFecha && matchVac && matchReg && matchCaso && matchInst;
     });
 
     if (pacientesFiltrados.length === 0) {
-        alert("⚠️ No hay registros que coincidan con estos filtros.");
+        alert("⚠️ No hay registros que coincidan con los filtros y la institución correspondientes.");
         btn.innerText = "Generar Reporte Seleccionado";
         return;
     }
 
+    // RELACIÓN UNO A MUCHOS (Foreign Key = ID_Paciente)
     const datosUnificados = pacientesFiltrados.map(p => ({
-        ...p, _historialVacunas: datosBD.historial_vacunas.filter(v => (buscarDato(v, "id_paciente") || buscarDato(v, "id")) == buscarDato(p, "id"))
+        ...p, _historialVacunas: datosBD.historial_vacunas.filter(v => buscarDato(v, "id_paciente") == buscarDato(p, "id")) // Llave exacta 1 y 21
     }));
 
     if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
@@ -220,38 +245,43 @@ function procesarAnexoBase(tipo, datos, fInit, fEnd, labelRango) {
                 
                 if (isMain) {
                     doc.setFontSize(5.5);
-                    if(col === 0) doc.text(buscarDato(p, "quién recibe atención"), d.cell.x + 2, d.cell.y + 10);
+                    // Llaves Exactas 3, 4, 5, 6, 7, 8, 9
+                    if(col === 0) doc.text(buscarDato(p, "quien recibe atencion") || "", d.cell.x + 2, d.cell.y + 10);
                     
-                    // Req 5: Textos Rotados 90 Grados con Desfase en Y
                     if(col === 1 || col === 2 || col === 3) {
                         let val = "";
                         if (col === 1) val = buscarDato(p, "curp");
-                        if (col === 2) val = buscarDato(p, "fecha ingresada") || buscarDato(p, "fecha de nacimiento");
+                        if (col === 2) val = normalizarFecha(buscarDato(p, "fecha ingresada")); 
                         if (col === 3) val = buscarDato(p, "edad");
                         
                         let idxPaciente = Math.floor(d.row.index / (tipo === "1-C" ? 1 : 2));
-                        let desfaseVertical = (idxPaciente % 2 === 0) ? 0 : 8; // Zigzag arriba/abajo
+                        let desfaseVertical = (idxPaciente % 2 === 0) ? 0 : 8; 
                         
-                        doc.text(val, d.cell.x + (d.cell.width/2) + 2, d.cell.y + d.cell.height - 2 - desfaseVertical, { angle: 90 });
+                        if (val) doc.text(String(val), d.cell.x + (d.cell.width/2) + 2, d.cell.y + d.cell.height - 2 - desfaseVertical, { angle: 90 });
                     }
-                    if(col === 4) doc.text(buscarDato(p, "sexo").toUpperCase().startsWith("M") ? "Masc" : "Fem", d.cell.x + (d.cell.width/2), d.cell.y + 10, { align: 'center' });
+
+                    if(col === 4) {
+                        let sx = parseSexo(buscarDato(p, "sexo"));
+                        doc.text(sx === "M" ? "Masc" : (sx === "F" ? "Fem" : ""), d.cell.x + (d.cell.width/2), d.cell.y + 10, { align: 'center' });
+                    }
                     
-                    // Req 7: Inyección en Celdas Fusionadas (aprovechan doble alto)
-                    if (col === 5) { doc.text(doc.splitTextToSize(buscarDato(p, "dirección"), d.cell.width - 2), d.cell.x + 1, d.cell.y + 8); }
-                    if (col === 6) { doc.text(doc.splitTextToSize(buscarDato(p, "colonia"), d.cell.width - 2), d.cell.x + 1, d.cell.y + 8); }
+                    if (col === 5) { doc.text(doc.splitTextToSize(buscarDato(p, "direccion") || "", d.cell.width - 2), d.cell.x + 1, d.cell.y + 8); }
+                    if (col === 6) { doc.text(doc.splitTextToSize(buscarDato(p, "colonia") || "", d.cell.width - 2), d.cell.x + 1, d.cell.y + 8); }
                 } 
                 else if (rowInfo.t === "PARENTESCO") {
                     if(col === 0) {
+                        // Llaves Exactas 14 y 15
                         let txtPar = `${buscarDato(p, "tipo de parentesco")} - ${buscarDato(p, "nombre pariente")}`;
                         doc.setFontSize(4.5); doc.text(txtPar, d.cell.x + 2, d.cell.y + 7);
                     }
                     if(col === 2) {
-                        doc.setFontSize(5.5); doc.text(buscarDato(p, "fecha nacimiento de pariente"), d.cell.x + (d.cell.width/2), d.cell.y + 7, { align: 'center' });
+                        // Llave Exacta 16
+                        doc.setFontSize(5.5); doc.text(normalizarFecha(buscarDato(p, "fecha nacimiento de pariente")), d.cell.x + (d.cell.width/2), d.cell.y + 7, { align: 'center' });
                     }
                 }
 
-                // Req de Colores de Vacuna: Rojo subrayado para hoy (rango actual), negro para antecedentes
                 if (col >= 7 && (rowInfo.t === "PARENTESCO" || rowInfo.t === "UNICO")) {
+                    // Llaves Exactas 22 y 23 procesadas dentro de buscarFechaVacuna
                     let fv = buscarFechaVacuna(p._historialVacunas, esquema[col-7].key); 
                     if (fv) {
                         let pIndex = Math.floor(d.row.index / (tipo === "1-C" ? 1 : 2));
@@ -259,14 +289,13 @@ function procesarAnexoBase(tipo, datos, fInit, fEnd, labelRango) {
                         let tX = d.cell.x + (d.cell.width/2) + offsetHorizontal;
                         let tY = d.cell.y + d.cell.height - 2; 
                         
-                        // Si la vacuna aplicada cae dentro del rango buscado en el filtro, es ROJA.
-                        if (fv >= fInit && fv <= fEnd) {
+                        if (fv >= fInit && fv <= fEnd) { // REGLA CONDICIONAL: ROJO SI ES FECHA ACTUAL
                             doc.setTextColor(255, 0, 0); 
                             doc.text(fv, tX, tY, { angle: 90 });
                             doc.setDrawColor(255, 0, 0); doc.setLineWidth(0.6);
-                            doc.line(tX + 2, tY, tX + 2, tY - 25); // Underline (rotado)
+                            doc.line(tX + 2, tY, tX + 2, tY - 25); 
                             doc.setTextColor(0); doc.setDrawColor(180); doc.setLineWidth(0.5);
-                        } else { // Antecedente histórico: NEGRO
+                        } else {
                             doc.text(fv, tX, tY, { angle: 90 });
                         }
                     }
@@ -381,33 +410,34 @@ function generarInformeActividad(datosUnificados, fInit, fEnd) {
 // 6. NUEVO REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL (Req 2)
 // ==========================================
 function generarAccionesBloqueo(unificados, fInit, fEnd) {
-    const casasVisitadas = unificados.length; // Cada registro del array general equivale a 1 domicilio censado
+    const casasVisitadas = unificados.length; 
     let famAus = 0, casaDes = 0, famRen = 0, lotBal = 0, negocios = 0, cSosp = 0, cProb = 0;
     const brigadasSet = new Set();
 
     unificados.forEach(p => {
-        let dom = String(buscarDato(p, "domicilio_visitado")).toLowerCase();
-        let sit = String(buscarDato(p, "situacion_domicilio")).toUpperCase();
-        let caso = String(buscarDato(p, "caso_en_domicilio"));
+        // Llaves Exactas 17, 18, 19, 20
+        let dom = String(buscarDato(p, "domicilio visitado")).toLowerCase(); 
+        let caso = String(buscarDato(p, "caso en domicilio")).toLowerCase();
 
-        if (sit === 'A') famAus++;
-        if (sit === 'R') famRen++;
+        // Clasificación basada en lectura de subcadenas del campo "domicilio visitado"
+        if (dom === 'a' || dom.includes('ausente')) famAus++;
+        if (dom === 'r' || dom.includes('renuente')) famRen++;
         if (dom.includes('deshabitada')) casaDes++;
         if (dom.includes('baldio') || dom.includes('baldío')) lotBal++;
         if (dom.includes('negocio')) negocios++;
-        if (caso.includes('Sospechoso')) cSosp++;
-        if (caso.includes('Probable')) cProb++;
 
-        // Req 2: Calculo de brigadas por combinación [caso + reg + vac]
+        if (caso.includes('sospechoso')) cSosp++;
+        if (caso.includes('probable')) cProb++;
+
+        // Llaves Exactas 11, 12, 17
         let reg = buscarDato(p, "registrador_nombre");
-        let vac = buscarDato(p, "nombre_vacunador");
-        let casoN = buscarDato(p, "bloqueo_nombre_caso") || "Brote_ND";
+        let vac = buscarDato(p, "nombre de vacunador");
+        let casoN = buscarDato(p, "nombre del caso") || "Brote_ND";
         brigadasSet.add(`${casoN}_${reg}_${vac}`);
     });
 
     const familiasEntrevistadas = casasVisitadas - (famAus + casaDes + famRen + lotBal + negocios);
     
-    // BUCKETING (Algoritmo de Matriz Poblacional)
     const matriz = {
         "menores 1 @": { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
         "1-4 @":       { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
@@ -422,23 +452,37 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     };
 
     unificados.forEach(p => {
-        let edad = parseInt(buscarDato(p, "edad")) || 0;
+        // USO DEL PARSER DE EDAD Y SEXO
+        let edadAnios = parseEdadEnAnios(buscarDato(p, "edad"));
         let bk = "";
-        if (edad < 1) bk = "menores 1 @"; else if (edad <= 4) bk = "1-4 @"; else if (edad <= 9) bk = "5-9 @"; else if (edad <= 12) bk = "10-12 @"; else if (edad <= 14) bk = "13-14 @"; else if (edad <= 24) bk = "15-24 @"; else if (edad <= 39) bk = "25-39 @"; else if (edad <= 44) bk = "40-44 @"; else if (edad <= 64) bk = "45-64 @"; else bk = "65 y más";
+        
+        if (edadAnios < 1) bk = "menores 1 @"; 
+        else if (edadAnios <= 4) bk = "1-4 @"; 
+        else if (edadAnios <= 9) bk = "5-9 @"; 
+        else if (edadAnios <= 12) bk = "10-12 @"; 
+        else if (edadAnios <= 14) bk = "13-14 @"; 
+        else if (edadAnios <= 24) bk = "15-24 @"; 
+        else if (edadAnios <= 39) bk = "25-39 @"; 
+        else if (edadAnios <= 44) bk = "40-44 @"; 
+        else if (edadAnios <= 64) bk = "45-64 @"; 
+        else bk = "65 y más";
 
         matriz[bk].t++;
-        if (buscarDato(p, "sexo").toUpperCase().startsWith("M")) matriz[bk].m++; else matriz[bk].f++;
+        let sx = parseSexo(buscarDato(p, "sexo"));
+        if (sx === "M") matriz[bk].m++; else if (sx === "F") matriz[bk].f++;
 
         let cartilla = false;
         p._historialVacunas.forEach(v => {
-            let fV = normalizarFecha(v.Fecha_Ingresada || buscarDato(v, "fecha_ingresada"));
-            let nV = String(v.vacuna_aplicada || Object.values(v)[1]).toUpperCase();
+            // Llaves Exactas 22 y 23
+            let fV = normalizarFecha(buscarDato(v, "fecha_ingresada"));
+            let nV = String(buscarDato(v, "vacuna_aplicada")).toUpperCase();
             
-            if (fV !== "" && (fV < fInit)) cartilla = true; // Antecedente comprobado (fecha pasada)
+            if (fV !== "" && (fV < fInit)) cartilla = true; 
             
-            if (fV >= fInit && fV <= fEnd) { // Dosis de esta campaña
-                if (nV.includes("SRP") && edad < 10) matriz[bk].srp++;
-                if (nV.includes("SR") && !nV.includes("SRP") && edad >= 10) matriz[bk].sr++;
+            if (fV >= fInit && fV <= fEnd) { 
+                // USO MATEMÁTICO DE EDAD PARA COLUMNAS SRP/SR
+                if (nV.includes("SRP") && edadAnios < 10) matriz[bk].srp++;
+                if (nV.includes("SR") && !nV.includes("SRP") && edadAnios >= 10) matriz[bk].sr++;
             }
         });
         if (cartilla) matriz[bk].cA++; else matriz[bk].sA++;
