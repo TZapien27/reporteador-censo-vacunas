@@ -484,6 +484,9 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         if (cartilla) matriz[bk].cA++; else matriz[bk].sA++;
     });
 
+    // UBICACIÓN: script.js -> dentro de generarAccionesBloqueo()
+    // ... [código anterior que cuenta casos y brigadas] ...
+
     const familiasEntrevistadas = casasVisitadas - (famAus + casaDes + famRen + lotBal + negocios);
     
     // 1. DECLARACIÓN E INICIALIZACIÓN OBLIGATORIA (Debe ir antes del forEach)
