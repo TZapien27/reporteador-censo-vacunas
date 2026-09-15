@@ -113,8 +113,13 @@ async function ejecutarGeneracionPorFiltros() {
     const tipoRep = document.getElementById("filtro-tipo").value;
     const fInit = document.getElementById("filtro-fecha-inicio").value;
     let fEnd = document.getElementById("filtro-fecha-fin").value;
-    if (!fInit) return alert("❌ Seleccione Fecha Inicial.");
-    if (!fEnd) fEnd = fInit; 
+
+    // LÓGICA DE FLEXIBILIZACIÓN DE FECHAS: 
+    // Solo exige fecha si NO es el reporte de Bloqueo.
+    if (!fInit && tipoRep !== "bloqueo") {
+        return alert("❌ Seleccione Fecha Inicial para este tipo de reporte.");
+    }
+    if (!fEnd && fInit) fEnd = fInit; 
 
     const vac = document.getElementById("filtro-vacunador").value;
     const reg = document.getElementById("filtro-registrador").value;
@@ -126,29 +131,35 @@ async function ejecutarGeneracionPorFiltros() {
     const datosBD = await obtenerDatosDesdeGoogle();
     if (!datosBD || !datosBD.censo) { alert("Error de BD"); btn.innerText = "Generar Reporte Seleccionado"; return; }
 
-    // FILTRADO MAESTRO REFORZADO CON LLAVES EXACTAS
     const pacientesFiltrados = datosBD.censo.filter(p => {
         let fAct = normalizarFecha(buscarDato(p, "fecha de la actividad"));
-        let instReg = String(buscarDato(p, "registrador_institucion")).toUpperCase(); // Llave exacta 10
+        let instReg = String(buscarDato(p, "registrador_institucion")).toUpperCase(); 
 
-        let matchFecha = (fAct >= fInit && fAct <= fEnd);
-        let matchVac = vac ? (buscarDato(p, "nombre de vacunador").includes(vac)) : true; // Llave exacta 11
-        let matchReg = reg ? (buscarDato(p, "registrador_nombre").includes(reg)) : true; // Llave exacta 12
-        let matchCaso = caso ? (buscarDato(p, "nombre del caso").toLowerCase().includes(caso)) : true; // Llave exacta 17
-        let matchInst = (instSeleccionada === "TODAS") ? true : instReg.includes(instSeleccionada); 
+        // Si fInit está vacío (permitido en bloqueos), el match de fecha es universalmente verdadero
+        let matchFecha = true;
+        if (fInit) {
+            matchFecha = (fAct >= fInit && fAct <= fEnd);
+        }
+
+        let matchVac = vac ? (buscarDato(p, "nombre de vacunador").includes(vac)) : true; 
+        let matchReg = reg ? (buscarDato(p, "registrador_nombre").includes(reg)) : true; 
+        let matchCaso = caso ? (buscarDato(p, "nombre del caso").toLowerCase().includes(caso)) : true; 
+        
+        // LÓGICA DE EXCLUSIÓN INSTITUCIONAL:
+        // Si el reporte es Bloqueo, la validación de institución devuelve true automáticamente.
+        let matchInst = (instSeleccionada === "TODAS" || tipoRep === "bloqueo") ? true : instReg.includes(instSeleccionada); 
 
         return matchFecha && matchVac && matchReg && matchCaso && matchInst;
     });
 
     if (pacientesFiltrados.length === 0) {
-        alert("⚠️ No hay registros que coincidan con los filtros y la institución correspondientes.");
+        alert("⚠️ No hay registros que coincidan con los filtros seleccionados.");
         btn.innerText = "Generar Reporte Seleccionado";
         return;
     }
 
-    // RELACIÓN UNO A MUCHOS (Foreign Key = ID_Paciente)
     const datosUnificados = pacientesFiltrados.map(p => ({
-        ...p, _historialVacunas: datosBD.historial_vacunas.filter(v => buscarDato(v, "id_paciente") == buscarDato(p, "id")) // Llave exacta 1 y 21
+        ...p, _historialVacunas: datosBD.historial_vacunas.filter(v => buscarDato(v, "id_paciente") == buscarDato(p, "id")) 
     }));
 
     if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
@@ -415,44 +426,6 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     const brigadasSet = new Set();
 
     unificados.forEach(p => {
-        // Llaves Exactas 17, 18, 19, 20
-        let dom = String(buscarDato(p, "domicilio visitado")).toLowerCase(); 
-        let caso = String(buscarDato(p, "caso en domicilio")).toLowerCase();
-
-        // Clasificación basada en lectura de subcadenas del campo "domicilio visitado"
-        if (dom === 'a' || dom.includes('ausente')) famAus++;
-        if (dom === 'r' || dom.includes('renuente')) famRen++;
-        if (dom.includes('deshabitada')) casaDes++;
-        if (dom.includes('baldio') || dom.includes('baldío')) lotBal++;
-        if (dom.includes('negocio')) negocios++;
-
-        if (caso.includes('sospechoso')) cSosp++;
-        if (caso.includes('probable')) cProb++;
-
-        // Llaves Exactas 11, 12, 17
-        let reg = buscarDato(p, "registrador_nombre");
-        let vac = buscarDato(p, "nombre de vacunador");
-        let casoN = buscarDato(p, "nombre del caso") || "Brote_ND";
-        brigadasSet.add(`${casoN}_${reg}_${vac}`);
-    });
-
-    const familiasEntrevistadas = casasVisitadas - (famAus + casaDes + famRen + lotBal + negocios);
-    
-    const matriz = {
-        "menores 1 @": { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
-        "1-4 @":       { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
-        "5-9 @":       { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
-        "10-12 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
-        "13-14 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
-        "15-24 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
-        "25-39 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
-        "40-44 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
-        "45-64 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
-        "65 y más":    { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 }
-    };
-
-    unificados.forEach(p => {
-        // USO DEL PARSER DE EDAD Y SEXO
         let edadAnios = parseEdadEnAnios(buscarDato(p, "edad"));
         let bk = "";
         
@@ -472,19 +445,82 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         if (sx === "M") matriz[bk].m++; else if (sx === "F") matriz[bk].f++;
 
         let cartilla = false;
+        // Fecha de actividad específica de ESTE paciente (vital si no hay fecha global)
+        let fechaActividadPaciente = normalizarFecha(buscarDato(p, "fecha de la actividad"));
+
         p._historialVacunas.forEach(v => {
-            // Llaves Exactas 22 y 23
             let fV = normalizarFecha(buscarDato(v, "fecha_ingresada"));
             let nV = String(buscarDato(v, "vacuna_aplicada")).toUpperCase();
             
-            if (fV !== "" && (fV < fInit)) cartilla = true; 
+            // Si la vacuna es estrictamente anterior a la visita de este paciente, es un antecedente
+            if (fV !== "" && (fV < fechaActividadPaciente)) {
+                cartilla = true; 
+            }
             
-            if (fV >= fInit && fV <= fEnd) { 
-                // USO MATEMÁTICO DE EDAD PARA COLUMNAS SRP/SR
+            // Si la vacuna se aplicó exactamente el mismo día que se registró la visita (Bloqueo)
+            if (fV !== "" && fV === fechaActividadPaciente) { 
                 if (nV.includes("SRP") && edadAnios < 10) matriz[bk].srp++;
                 if (nV.includes("SR") && !nV.includes("SRP") && edadAnios >= 10) matriz[bk].sr++;
             }
         });
+        
+        if (cartilla) matriz[bk].cA++; else matriz[bk].sA++;
+    });
+
+    const familiasEntrevistadas = casasVisitadas - (famAus + casaDes + famRen + lotBal + negocios);
+    
+    const matriz = {
+        "menores 1 @": { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
+        "1-4 @":       { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
+        "5-9 @":       { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
+        "10-12 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
+        "13-14 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
+        "15-24 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
+        "25-39 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
+        "40-44 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
+        "45-64 @":     { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
+        "65 y más":    { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 }
+    };
+
+    unificados.forEach(p => {
+        let edadAnios = parseEdadEnAnios(buscarDato(p, "edad"));
+        let bk = "";
+        
+        if (edadAnios < 1) bk = "menores 1 @"; 
+        else if (edadAnios <= 4) bk = "1-4 @"; 
+        else if (edadAnios <= 9) bk = "5-9 @"; 
+        else if (edadAnios <= 12) bk = "10-12 @"; 
+        else if (edadAnios <= 14) bk = "13-14 @"; 
+        else if (edadAnios <= 24) bk = "15-24 @"; 
+        else if (edadAnios <= 39) bk = "25-39 @"; 
+        else if (edadAnios <= 44) bk = "40-44 @"; 
+        else if (edadAnios <= 64) bk = "45-64 @"; 
+        else bk = "65 y más";
+
+        matriz[bk].t++;
+        let sx = parseSexo(buscarDato(p, "sexo"));
+        if (sx === "M") matriz[bk].m++; else if (sx === "F") matriz[bk].f++;
+
+        let cartilla = false;
+        // Fecha de actividad específica de ESTE paciente (vital si no hay fecha global)
+        let fechaActividadPaciente = normalizarFecha(buscarDato(p, "fecha de la actividad"));
+
+        p._historialVacunas.forEach(v => {
+            let fV = normalizarFecha(buscarDato(v, "fecha_ingresada"));
+            let nV = String(buscarDato(v, "vacuna_aplicada")).toUpperCase();
+            
+            // Si la vacuna es estrictamente anterior a la visita de este paciente, es un antecedente
+            if (fV !== "" && (fV < fechaActividadPaciente)) {
+                cartilla = true; 
+            }
+            
+            // Si la vacuna se aplicó exactamente el mismo día que se registró la visita (Bloqueo)
+            if (fV !== "" && fV === fechaActividadPaciente) { 
+                if (nV.includes("SRP") && edadAnios < 10) matriz[bk].srp++;
+                if (nV.includes("SR") && !nV.includes("SRP") && edadAnios >= 10) matriz[bk].sr++;
+            }
+        });
+        
         if (cartilla) matriz[bk].cA++; else matriz[bk].sA++;
     });
 
@@ -496,7 +532,10 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     doc.text("ACCIONES REALIZADAS EN BLOQUEO VACUNAL", pW / 2, 30, { align: 'center' });
 
     doc.setFontSize(8); doc.setTextColor(0); doc.setFont(undefined, 'normal');
-    doc.text(`FECHA / RANGO: ${fInit} a ${fEnd}`, 40, 50);
+    
+    // Indicador dinámico de rango de fechas
+    let textoRango = (fInit && fEnd) ? `${fInit} a ${fEnd}` : "Histórico Completo (Sin filtro de fechas)";
+    doc.text(`FECHA / RANGO: ${textoRango}`, 40, 50);
     doc.text(`BRIGADAS ACTIVAS: ${brigadasSet.size || 1}`, 40, 65);
     
     // Tabla Operativa Superior
