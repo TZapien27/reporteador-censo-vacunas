@@ -486,6 +486,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 
     const familiasEntrevistadas = casasVisitadas - (famAus + casaDes + famRen + lotBal + negocios);
     
+    // 1. DECLARACIÓN E INICIALIZACIÓN OBLIGATORIA (Debe ir antes del forEach)
     const matriz = {
         "menores 1 @": { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
         "1-4 @":       { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
@@ -499,6 +500,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         "65 y más":    { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 }
     };
 
+    // 2. ASIGNACIÓN MATEMÁTICA (Ahora es seguro manipular la 'matriz')
     unificados.forEach(p => {
         let edadAnios = parseEdadEnAnios(buscarDato(p, "edad"));
         let bk = "";
@@ -519,19 +521,16 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         if (sx === "M") matriz[bk].m++; else if (sx === "F") matriz[bk].f++;
 
         let cartilla = false;
-        // Fecha de actividad específica de ESTE paciente (vital si no hay fecha global)
         let fechaActividadPaciente = normalizarFecha(buscarDato(p, "fecha de la actividad"));
 
         p._historialVacunas.forEach(v => {
             let fV = normalizarFecha(buscarDato(v, "fecha_ingresada"));
             let nV = String(buscarDato(v, "vacuna_aplicada")).toUpperCase();
             
-            // Si la vacuna es estrictamente anterior a la visita de este paciente, es un antecedente
             if (fV !== "" && (fV < fechaActividadPaciente)) {
                 cartilla = true; 
             }
             
-            // Si la vacuna se aplicó exactamente el mismo día que se registró la visita (Bloqueo)
             if (fV !== "" && fV === fechaActividadPaciente) { 
                 if (nV.includes("SRP") && edadAnios < 10) matriz[bk].srp++;
                 if (nV.includes("SR") && !nV.includes("SRP") && edadAnios >= 10) matriz[bk].sr++;
@@ -541,6 +540,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         if (cartilla) matriz[bk].cA++; else matriz[bk].sA++;
     });
 
+    // 3. RENDERIZADO VISUAL
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('l', 'pt', 'letter');
     const pW = doc.internal.pageSize.width;
@@ -550,7 +550,6 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 
     doc.setFontSize(8); doc.setTextColor(0); doc.setFont(undefined, 'normal');
     
-    // Indicador dinámico de rango de fechas
     let textoRango = (fInit && fEnd) ? `${fInit} a ${fEnd}` : "Histórico Completo (Sin filtro de fechas)";
     doc.text(`FECHA / RANGO: ${textoRango}`, 40, 50);
     doc.text(`BRIGADAS ACTIVAS: ${brigadasSet.size || 1}`, 40, 65);
@@ -586,7 +585,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 
     tablaPoblacion.push([
         "TOTAL", sTot, sMasc, sFem, sCa, sSa, sSrp, sSr, sDos, 
-        (sumProv/keys.length).toFixed(2)+"%", (sumEnc/keys.length).toFixed(2)+"%", (sumFin/keys.length).toFixed(2)+"%" // Promedios de promedios
+        (sumProv/keys.length).toFixed(2)+"%", (sumEnc/keys.length).toFixed(2)+"%", (sumFin/keys.length).toFixed(2)+"%"
     ]);
 
     doc.autoTable({
@@ -596,7 +595,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         theme: 'grid', styles: { fontSize: 7, halign: 'center' }, headStyles: { fillColor: [188, 149, 92] }
     });
 
-    let fName = fInit === fEnd ? fInit : `${fInit}_${fEnd}`;
+    let fName = (fInit && fEnd) ? (fInit === fEnd ? fInit : `${fInit}_${fEnd}`) : "Historico";
     doc.save(`Bloqueo_Vacunal_${fName}.pdf`);
     alert("✅ Formato de Bloqueo generado.");
 }
