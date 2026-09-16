@@ -635,49 +635,94 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     // 7. TABLA DE POBLACIÓN ENCUESTADA (Abajo)
     let keys = Object.keys(matriz);
     let sTot=0, sMasc=0, sFem=0, sCa=0, sSa=0, sSrp=0, sSr=0, sDos=0;
-    let sumProv=0, sumEnc=0;
-    let validFinalAverages = 0, sumFinalAverages = 0; // Para promediar solo celdas válidas
+    
+    // Variables para la suma literal de los porcentajes requerida por el formato
+    let sumProv = 0, sumEnc = 0;
+    
+    // Variables aisladas para el promedio de Cobertura Final
+    let sumFinalAverages = 0, validFinalAverages = 0; 
 
     const tablaPoblacion = keys.map(k => {
         let r = matriz[k];
         let dosis = r.srp + r.sr;
+        
+        // Cálculos porcentuales individuales por fila
         let provac = r.t > 0 ? (dosis / r.t) * 100 : 0;
         let encuesta = r.t > 0 ? (r.cA / r.t) * 100 : 0;
         let final = provac + encuesta;
 
+        // Acumuladores de columnas estándar (Sumas)
         sTot+=r.t; sMasc+=r.m; sFem+=r.f; sCa+=r.cA; sSa+=r.sA; sSrp+=r.srp; sSr+=r.sr; sDos+=dosis;
         
+        // Acumuladores porcentuales (Suma literal de los porcentajes arrojados por fila)
+        sumProv += provac; 
+        sumEnc += encuesta;
+
+        // Evaluación para el Promedio exclusivo de Cobertura Final
         if (r.t > 0) {
-            sumProv += provac; 
-            sumEnc += encuesta;
             sumFinalAverages += final;
-            validFinalAverages++; // Cuentan para el promedio solo las filas con población
+            validFinalAverages++;
         }
 
-        return [k, r.t, r.m, r.f, r.cA, r.sA, r.srp, r.sr, dosis, provac.toFixed(2)+"%", encuesta.toFixed(2)+"%", final.toFixed(2)+"%"];
+        return [
+            k, r.t, r.m, r.f, r.cA, r.sA, r.srp, r.sr, dosis, 
+            provac.toFixed(2) + "%", 
+            encuesta.toFixed(2) + "%", 
+            final.toFixed(2) + "%"
+        ];
     });
 
-    // Cálculos de Totales absolutos para porcentajes generales de la columna (excepto Cobertura Final que es Promedio)
-    let totalProvacGeneral = sTot > 0 ? (sDos / sTot) * 100 : 0;
-    let totalEncuestaGeneral = sTot > 0 ? (sCa / sTot) * 100 : 0;
+    // Cálculo del promedio aislando las filas sin población para no diluir el dato
     let promedioFinal = validFinalAverages > 0 ? (sumFinalAverages / validFinalAverages) : 0;
 
+    // Fila Total: Regla estricta de sumas para todas las columnas, excepto Cobertura Final (Promedio)
     tablaPoblacion.push([
         "TOTAL", sTot, sMasc, sFem, sCa, sSa, sSrp, sSr, sDos, 
-        totalProvacGeneral.toFixed(2)+"%", totalEncuestaGeneral.toFixed(2)+"%", promedioFinal.toFixed(2)+"%"
+        sumProv.toFixed(2) + "%", 
+        sumEnc.toFixed(2) + "%", 
+        promedioFinal.toFixed(2) + "%"
     ]);
 
-    // Asegurar que la tabla inicie después de la más larga de arriba
+    // Asegurar que la tabla inicie respetando el alto dinámico de las 3 tablas superiores
     let YTablasSuperiores = Math.max(doc.previousAutoTable.finalY, startYTablas + 120);
 
     doc.autoTable({
         startY: YTablasSuperiores + 15,
-        head: [['GRUPOS DE EDAD', 'TOTAL', 'MASC', 'FEM', 'CON ANTECEDENTE', 'SIN ANTECEDENTE', 'APLIC. TRIPLE VIRAL', 'APLIC. SR', 'DOSIS APLICADAS', 'COB. PROVAC', 'ENCUESTA RÁPIDA', 'COB. FINAL (Promedio)']],
+        head: [[
+            'GRUPOS DE\nEDAD', 
+            'TOTAL', 
+            'MASC.', 
+            'FEM.', 
+            'CON\nANTECEDENTE\nVACUNAL', 
+            'SIN\nANTECEDENTE\nVACUNAL', 
+            'APLICACIÓN DE\nVACUNA PARA\nESQUEMA\nTRIPLE VIRAL', 
+            'APLICACIÓN DE\nVACUNA PARA\nESQUEMA SR', 
+            'DOSIS\nAPLICADAS', 
+            'COBERTURA\nPROVAC', 
+            'ENCUESTA\nRAPIDA DE\nCOBERTURA', 
+            'COBERTURA\nFINAL'
+        ]],
         body: tablaPoblacion,
-        theme: 'grid', styles: { fontSize: 7, halign: 'center' }, headStyles: { fillColor: [188, 149, 92] }
+        theme: 'grid', 
+        styles: { 
+            fontSize: 6, 
+            halign: 'center', 
+            valign: 'middle', 
+            cellPadding: 1 
+        }, 
+        headStyles: { 
+            fillColor: [255, 255, 255], 
+            textColor: [0, 0, 0], 
+            lineWidth: 0.5, 
+            lineColor: [0, 0, 0] 
+        },
+        bodyStyles: { 
+            lineWidth: 0.5, 
+            lineColor: [0, 0, 0] 
+        }
     });
 
-    let fName = (fInit && fEnd) ? (fInit === fEnd ? fInit : `${fInit}_${fEnd}`) : "Historico";
+    let fName = (fInit && fEnd && fInit !== fEnd) ? `${fInit}_${fEnd}` : (fInit ? fInit : "Historico");
     doc.save(`Bloqueo_Vacunal_${fName}.pdf`);
     alert("✅ Formato de Bloqueo generado exitosamente.");
 }
