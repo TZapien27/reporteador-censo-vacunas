@@ -437,8 +437,38 @@ function generarInformeActividad(datosUnificados, fInit, fEnd) {
 // ==========================================
 // 6. NUEVO REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL
 // ==========================================
+// ==========================================
+// 6. REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL
+// ==========================================
 function generarAccionesBloqueo(unificados, fInit, fEnd) {
-    // 1. CÁLCULO DE VIVIENDAS Y BRIGADAS
+    if (unificados.length === 0) {
+        alert("No hay registros para procesar.");
+        return;
+    }
+
+    // 1. DATOS GENERALES (Tomados del primer registro, ya que se repiten)
+    const repBase = unificados[0];
+    const datosGen = {
+        entidad: buscarDato(repBase, "entidad de residencia"),
+        municipio: buscarDato(repBase, "municipio"),
+        localidad: buscarDato(repBase, "localidad"),
+        colonia: buscarDato(repBase, "colonia"),
+        ageb: buscarDato(repBase, "ageb"),
+        area: "", // Se deja en blanco por instrucción
+        caso: buscarDato(repBase, "nombre del caso") || "Brote_ND",
+        fNotif: normalizarFecha(buscarDato(repBase, "fecha de notificación")),
+        fInicio: normalizarFecha(buscarDato(repBase, "fecha de inicio de actividades")),
+        fEnvio: normalizarFecha(buscarDato(repBase, "fecha de envío"))
+    };
+
+    // 2. ESTADO DEL BLOQUEO Y MANZANAS RECORRIDAS
+    let manzanasTXT = "Bloqueo aún no se ha cerrado, está como pendiente";
+    const registroCierre = unificados.find(p => String(buscarDato(p, "último registro")).toLowerCase().includes("s"));
+    if (registroCierre) {
+        manzanasTXT = buscarDato(registroCierre, "número de manzanas recorridas") || "0";
+    }
+
+    // 3. MÉTRICAS OPERATIVAS Y BRIGADAS
     const casasVisitadas = unificados.length; 
     let famAus = 0, casaDes = 0, famRen = 0, lotBal = 0, negocios = 0, cSosp = 0, cProb = 0;
     const brigadasSet = new Set();
@@ -458,13 +488,12 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 
         let reg = buscarDato(p, "registrador_nombre");
         let vac = buscarDato(p, "nombre de vacunador");
-        let casoN = buscarDato(p, "nombre del caso") || "Brote_ND";
-        brigadasSet.add(`${casoN}_${reg}_${vac}`);
+        brigadasSet.add(`${datosGen.caso}_${reg}_${vac}`);
     });
 
     const familiasEntrevistadas = casasVisitadas - (famAus + casaDes + famRen + lotBal + negocios);
-    
-    // 2. DECLARACIÓN DE LA MATRIZ (ESTRICTAMENTE ANTES DE LLENARLA)
+
+    // 4. ESTRUCTURAS DE CONTEO (POBLACIÓN Y VACUNAS)
     const matriz = {
         "menores 1 @": { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
         "1-4 @":       { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 },
@@ -478,7 +507,13 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         "65 y más":    { t: 0, m: 0, f: 0, cA: 0, sA: 0, srp: 0, sr: 0 }
     };
 
-    // 3. POBLADO MATEMÁTICO DE LA MATRIZ Y CRUCE DE VACUNAS
+    const conteoVacs = {
+        hexa: 0, rota: 0, srp: 0, dpt: 0, hepB: 0, neumo13: 0, td: 0,
+        influ: 0, sr: 0, hepA: 0, vari: 0, tdpa: 0, neumo23: 0, covid: 0, vph: 0, otras: 0
+    };
+    let totalDosisGeneral = 0;
+
+    // 5. POBLADO MATEMÁTICO
     unificados.forEach(p => {
         let edadAnios = parseEdadEnAnios(buscarDato(p, "edad"));
         let bk = "";
@@ -505,20 +540,43 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
             let fV = normalizarFecha(buscarDato(v, "fecha_ingresada"));
             let nV = String(buscarDato(v, "vacuna_aplicada")).toUpperCase();
             
+            // Antecedente
             if (fV !== "" && (fV < fechaActividadPaciente)) {
                 cartilla = true; 
             }
             
+            // Aplicación en la actividad (Dosis Sumadas al Bloqueo)
             if (fV !== "" && fV === fechaActividadPaciente) { 
+                totalDosisGeneral++;
+
+                // Para la Matriz SRP/SR (Restricción por Edad)
                 if (nV.includes("SRP") && edadAnios < 10) matriz[bk].srp++;
                 if (nV.includes("SR") && !nV.includes("SRP") && edadAnios >= 10) matriz[bk].sr++;
+
+                // Para el Desglose Global (Tabla derecha)
+                if (nV.includes("HEXA")) conteoVacs.hexa++;
+                else if (nV.includes("ROTA")) conteoVacs.rota++;
+                else if (nV.includes("SRP") || nV.includes("TRIPLE VIRAL")) conteoVacs.srp++;
+                else if (nV.includes("DPT")) conteoVacs.dpt++;
+                else if (nV.includes("HEP") && nV.includes("B")) conteoVacs.hepB++;
+                else if (nV.includes("NEUMO") && nV.includes("13")) conteoVacs.neumo13++;
+                else if (nV.includes("TDPA")) conteoVacs.tdpa++;
+                else if (nV.includes("TD") && !nV.includes("TDPA")) conteoVacs.td++;
+                else if (nV.includes("INFLU")) conteoVacs.influ++;
+                else if (nV.includes("SR") && !nV.includes("SRP")) conteoVacs.sr++;
+                else if (nV.includes("HEP") && nV.includes("A")) conteoVacs.hepA++;
+                else if (nV.includes("VARI")) conteoVacs.vari++;
+                else if (nV.includes("NEUMO") && nV.includes("23")) conteoVacs.neumo23++;
+                else if (nV.includes("COVID")) conteoVacs.covid++;
+                else if (nV.includes("VPH")) conteoVacs.vph++;
+                else conteoVacs.otras++;
             }
         });
         
         if (cartilla) matriz[bk].cA++; else matriz[bk].sA++;
     });
 
-    // 4. RENDERIZADO VISUAL DEL REPORTE (PDF)
+    // 6. RENDERIZADO VISUAL DEL REPORTE (PDF EN PARALELO)
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('l', 'pt', 'letter');
     const pW = doc.internal.pageSize.width;
@@ -526,27 +584,59 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
     doc.text("ACCIONES REALIZADAS EN BLOQUEO VACUNAL", pW / 2, 30, { align: 'center' });
 
-    doc.setFontSize(8); doc.setTextColor(0); doc.setFont(undefined, 'normal');
+    let textoRango = (fInit && fEnd && fInit !== fEnd) ? `${fInit} a ${fEnd}` : (fInit ? fInit : "Histórico Completo");
+    doc.setFontSize(8); doc.setTextColor(0); doc.text(`RANGO / FECHA: ${textoRango}`, 40, 50);
+
+    const startYTablas = 60;
     
-    let textoRango = (fInit && fEnd) ? `${fInit} a ${fEnd}` : "Histórico Completo (Sin filtro de fechas)";
-    doc.text(`FECHA / RANGO: ${textoRango}`, 40, 50);
-    doc.text(`BRIGADAS ACTIVAS: ${brigadasSet.size || 1}`, 40, 65);
-    
-    // AutoTable Superior (Operativo)
+    // TABLA 1: DATOS GENERALES (Izquierda)
     doc.autoTable({
-        startY: 75, margin: { left: 40 }, tableWidth: 300,
+        startY: startYTablas, margin: { left: 40 }, tableWidth: 220,
         body: [
-            ['Casas Visitadas (Censo App)', casasVisitadas], ['Familias Entrevistadas (Efectivas)', familiasEntrevistadas],
-            ['Familias Ausentes (A)', famAus], ['Casas Deshabitadas (DH)', casaDes], ['Familias Renuentes (R)', famRen],
-            ['Lotes Baldíos', lotBal], ['Negocios', negocios], ['Casos Sospechosos', cSosp], ['Casos Probables', cProb]
+            ['ENTIDAD:', datosGen.entidad], ['MUNICIPIO:', datosGen.municipio],
+            ['LOCALIDAD / COLONIA:', `${datosGen.localidad} / ${datosGen.colonia}`],
+            ['AGEBS TRABAJADOS:', datosGen.ageb], ['ÁREA RESPONSABILIDAD:', datosGen.area],
+            ['NOMBRE DEL CASO:', datosGen.caso], ['FECHA NOTIFICACIÓN:', datosGen.fNotif],
+            ['INICIO ACTIVIDADES:', datosGen.fInicio], ['FECHA DE ENVÍO:', datosGen.fEnvio]
         ],
-        theme: 'grid', styles: { fontSize: 7 }
+        theme: 'grid', styles: { fontSize: 7, cellPadding: 2 }, columnStyles: { 0: { fontStyle: 'bold', fillColor: [240, 240, 240] } }
     });
 
-    // AutoTable Inferior (Matriz Encuestada)
+    // TABLA 2: MÉTRICAS OPERATIVAS (Centro)
+    doc.autoTable({
+        startY: startYTablas, margin: { left: 270 }, tableWidth: 220,
+        body: [
+            ['MANZANAS RECORRIDAS', manzanasTXT], ['CASAS VISITADAS', casasVisitadas],
+            ['FAMILIAS ENTREVISTADAS', familiasEntrevistadas], ['FAMILIAS AUSENTES', famAus], 
+            ['CASAS DESHABITADAS', casaDes], ['FAMILIAS RENUENTES', famRen],
+            ['LOTES BALDÍOS', lotBal], ['NEGOCIOS', negocios], 
+            ['CASOS SOSPECHOSOS', cSosp], ['CASOS PROBABLES', cProb]
+        ],
+        theme: 'grid', styles: { fontSize: 7, cellPadding: 2 }, columnStyles: { 0: { fontStyle: 'bold', fillColor: [240, 240, 240] } }
+    });
+
+    // TABLA 3: DESGLOSE DE VACUNAS (Derecha)
+    doc.autoTable({
+        startY: startYTablas, margin: { left: 500 }, tableWidth: 250,
+        body: [
+            ['No. DE BRIGADAS', brigadasSet.size || 1], ['DOSIS APLICADAS (Total)', totalDosisGeneral],
+            ['VACUNA HEXAVALENTE', conteoVacs.hexa], ['VACUNA ROTAVIRUS', conteoVacs.rota],
+            ['VACUNA TRIPLE VIRAL (SRP)', conteoVacs.srp], ['VACUNA DPT', conteoVacs.dpt],
+            ['VACUNA HEPATITIS B', conteoVacs.hepB], ['VACUNA NEUMO 13', conteoVacs.neumo13],
+            ['VACUNA TD', conteoVacs.td], ['VACUNA INFLUENZA', conteoVacs.influ],
+            ['VACUNA SR', conteoVacs.sr], ['VACUNA HEPATITIS A', conteoVacs.hepA],
+            ['VACUNA VARICELA', conteoVacs.vari], ['VACUNA TDPA', conteoVacs.tdpa],
+            ['VACUNA NEUMO 23', conteoVacs.neumo23], ['VACUNA COVID', conteoVacs.covid],
+            ['VACUNA VPH', conteoVacs.vph], ['OTRAS', conteoVacs.otras]
+        ],
+        theme: 'grid', styles: { fontSize: 7, cellPadding: 2 }, columnStyles: { 0: { fontStyle: 'bold', fillColor: [240, 240, 240] } }
+    });
+
+    // 7. TABLA DE POBLACIÓN ENCUESTADA (Abajo)
     let keys = Object.keys(matriz);
     let sTot=0, sMasc=0, sFem=0, sCa=0, sSa=0, sSrp=0, sSr=0, sDos=0;
-    let sumProv=0, sumEnc=0, sumFin=0;
+    let sumProv=0, sumEnc=0;
+    let validFinalAverages = 0, sumFinalAverages = 0; // Para promediar solo celdas válidas
 
     const tablaPoblacion = keys.map(k => {
         let r = matriz[k];
@@ -556,24 +646,38 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         let final = provac + encuesta;
 
         sTot+=r.t; sMasc+=r.m; sFem+=r.f; sCa+=r.cA; sSa+=r.sA; sSrp+=r.srp; sSr+=r.sr; sDos+=dosis;
-        sumProv+=provac; sumEnc+=encuesta; sumFin+=final;
+        
+        if (r.t > 0) {
+            sumProv += provac; 
+            sumEnc += encuesta;
+            sumFinalAverages += final;
+            validFinalAverages++; // Cuentan para el promedio solo las filas con población
+        }
 
         return [k, r.t, r.m, r.f, r.cA, r.sA, r.srp, r.sr, dosis, provac.toFixed(2)+"%", encuesta.toFixed(2)+"%", final.toFixed(2)+"%"];
     });
 
+    // Cálculos de Totales absolutos para porcentajes generales de la columna (excepto Cobertura Final que es Promedio)
+    let totalProvacGeneral = sTot > 0 ? (sDos / sTot) * 100 : 0;
+    let totalEncuestaGeneral = sTot > 0 ? (sCa / sTot) * 100 : 0;
+    let promedioFinal = validFinalAverages > 0 ? (sumFinalAverages / validFinalAverages) : 0;
+
     tablaPoblacion.push([
         "TOTAL", sTot, sMasc, sFem, sCa, sSa, sSrp, sSr, sDos, 
-        (sumProv/keys.length).toFixed(2)+"%", (sumEnc/keys.length).toFixed(2)+"%", (sumFin/keys.length).toFixed(2)+"%"
+        totalProvacGeneral.toFixed(2)+"%", totalEncuestaGeneral.toFixed(2)+"%", promedioFinal.toFixed(2)+"%"
     ]);
 
+    // Asegurar que la tabla inicie después de la más larga de arriba
+    let YTablasSuperiores = Math.max(doc.previousAutoTable.finalY, startYTablas + 120);
+
     doc.autoTable({
-        startY: doc.lastAutoTable.finalY + 20,
-        head: [['GRUPOS DE EDAD', 'TOTAL', 'MASC', 'FEM', 'CON ANTECEDENTE', 'SIN ANTECEDENTE', 'APLIC. TRIPLE VIRAL', 'APLIC. SR', 'DOSIS APLICADAS', 'COB. PROVAC', 'ENCUESTA RÁPIDA', 'COB. FINAL']],
+        startY: YTablasSuperiores + 15,
+        head: [['GRUPOS DE EDAD', 'TOTAL', 'MASC', 'FEM', 'CON ANTECEDENTE', 'SIN ANTECEDENTE', 'APLIC. TRIPLE VIRAL', 'APLIC. SR', 'DOSIS APLICADAS', 'COB. PROVAC', 'ENCUESTA RÁPIDA', 'COB. FINAL (Promedio)']],
         body: tablaPoblacion,
         theme: 'grid', styles: { fontSize: 7, halign: 'center' }, headStyles: { fillColor: [188, 149, 92] }
     });
 
     let fName = (fInit && fEnd) ? (fInit === fEnd ? fInit : `${fInit}_${fEnd}`) : "Historico";
     doc.save(`Bloqueo_Vacunal_${fName}.pdf`);
-    alert("✅ Formato de Bloqueo generado.");
+    alert("✅ Formato de Bloqueo generado exitosamente.");
 }
