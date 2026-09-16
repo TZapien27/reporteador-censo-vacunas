@@ -66,15 +66,28 @@ const normalizarFecha = (f) => {
     return `${anio}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`; 
 };
 
-// Convierte "10 años, 7 meses" o "11 meses" a un entero utilizable matemáticamente
+// Convierte "10 años", "11 meses", o numéricos "25" a enteros válidos
 const parseEdadEnAnios = (edadStr) => {
-    if (!edadStr) return 0;
-    let str = String(edadStr).toLowerCase();
+    // Si viene vacío o indefinido, devuelve -1 para ignorarlo en el conteo
+    if (!edadStr || String(edadStr).trim() === "") return -1; 
+    
+    let str = String(edadStr).toLowerCase().trim();
+    
+    // Si contiene la palabra explícita
     if (str.includes("año") || str.includes("ano")) {
         let match = str.match(/(\d+)\s*(año|ano)/);
-        return match ? parseInt(match[1]) : 0;
+        return match ? parseInt(match[1]) : -1;
     }
-    return 0; // Si solo dice "meses", tiene 0 años cumplidos.
+    // Si contiene solo meses o días, tiene 0 años (Es menor de 1)
+    if (str.includes("mes") || str.includes("dia") || str.includes("día")) {
+        return 0;
+    }
+    // Si es un número puro sin texto (ej. "15" o "40")
+    if (!isNaN(str)) {
+        return parseInt(str);
+    }
+    
+    return -1; // Fallback para datos corruptos
 };
 
 // Convierte "H/M" de la BD al formato del reporte
@@ -516,6 +529,11 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     // 5. POBLADO MATEMÁTICO
     unificados.forEach(p => {
         let edadAnios = parseEdadEnAnios(buscarDato(p, "edad"));
+        
+        // ESCUDO LÓGICO: Si la edad devolvió -1 (vacía o corrupta), 
+        // interrumpe la iteración de este paciente para no inflar los menores de 1.
+        if (edadAnios === -1) return; 
+
         let bk = "";
         
         if (edadAnios < 1) bk = "menores 1 @"; 
@@ -545,15 +563,15 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
                 cartilla = true; 
             }
             
-            // Aplicación en la actividad (Dosis Sumadas al Bloqueo)
+            // Aplicación en la actividad actual
             if (fV !== "" && fV === fechaActividadPaciente) { 
-                totalDosisGeneral++;
+                totalDosisGeneral++; // Suma a la tabla general de vacunas
 
-                // Para la Matriz SRP/SR (Restricción por Edad)
+                // Restricción por Edad solicitada para SRP y SR
                 if (nV.includes("SRP") && edadAnios < 10) matriz[bk].srp++;
                 if (nV.includes("SR") && !nV.includes("SRP") && edadAnios >= 10) matriz[bk].sr++;
 
-                // Para el Desglose Global (Tabla derecha)
+                // Para el Desglose Global (Tabla derecha superior)
                 if (nV.includes("HEXA")) conteoVacs.hexa++;
                 else if (nV.includes("ROTA")) conteoVacs.rota++;
                 else if (nV.includes("SRP") || nV.includes("TRIPLE VIRAL")) conteoVacs.srp++;
