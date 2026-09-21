@@ -203,6 +203,11 @@ async function ejecutarGeneracionPorFiltros() {
 function generarAnexosCenso(datosUnificados, fInit, fEnd) {
     const grupos = { "1-A": [], "1-B": [], "1-C": [] };
     datosUnificados.forEach(f => {
+        let nombrePaciente = buscarDato(f, "quien recibe atencion") || buscarDato(f, "nombre del paciente");
+        
+        if (!nombrePaciente || String(nombrePaciente).trim() === "") {
+            return; 
+        }
         let catEdad = String(buscarDato(f, "tipo de vacunacion")).toLowerCase();
         let tipo = (catEdad.includes("0 a 9") || catEdad.includes("infante")) ? "1-A" : (catEdad.includes("10 a 19") || catEdad.includes("adolescente")) ? "1-B" : "1-C";
         grupos[tipo].push(f);
@@ -447,9 +452,6 @@ function generarInformeActividad(datosUnificados, fInit, fEnd) {
     alert("✅ Informe generado.");
 }
 
-// ==========================================
-// 6. NUEVO REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL
-// ==========================================
 // ==========================================
 // 6. REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL
 // ==========================================
