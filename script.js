@@ -56,6 +56,17 @@ function buscarDato(fila, parteNombre) {
     return "";
 }
 
+// UBICACIÓN: script.js -> Sección de Funciones Auxiliares
+const abreviarEdad = (edadStr) => {
+    if (!edadStr) return "";
+    return String(edadStr)
+        .toLowerCase()
+        .replace(/años|año/g, 'a')
+        .replace(/meses|mes/g, 'm')
+        .replace(/\s+/g, ' ') // Limpia espacios dobles
+        .trim();
+};
+
 const normalizarFecha = (f) => {
     if (!f) return "";
     let soloFecha = String(f).split(' ')[0]; 
@@ -294,16 +305,39 @@ function procesarAnexoBase(tipo, datos, fInit, fEnd, labelRango) {
                     // Llaves Exactas 3, 4, 5, 6, 7, 8, 9
                     if(col === 0) doc.text(buscarDato(p, "quien recibe atencion") || "", d.cell.x + 2, d.cell.y + 10);
                     
-                    if(col === 1 || col === 2 || col === 3) {
-                        let val = "";
-                        if (col === 1) val = buscarDato(p, "curp");
-                        if (col === 2) val = normalizarFecha(buscarDato(p, "fecha ingresada")); 
-                        if (col === 3) val = buscarDato(p, "edad");
-                        
-                        let idxPaciente = Math.floor(d.row.index / (tipo === "1-C" ? 1 : 2));
-                        let desfaseVertical = (idxPaciente % 2 === 0) ? 0 : 8; 
-                        
-                        if (val) doc.text(String(val), d.cell.x + (d.cell.width/2) + 2, d.cell.y + d.cell.height - 2 - desfaseVertical, { angle: 90 });
+                    // Columna 1: CURP (Horizontal, letra pequeña para ajustar)
+                    if(col === 1) {
+                        let curp = buscarDato(p, "curp");
+                        if (curp) {
+                            doc.setFontSize(4.5); // Reducción de fuente crítica para ajustar 18 caracteres
+                            doc.text(String(curp).toUpperCase(), d.cell.x + 1, d.cell.y + 10);
+                            doc.setFontSize(5.5); // Restaurar fuente base del documento
+                        }
+                    }
+                    
+                    // Columna 2: F.NAC (Rotada a 90° con desplazamiento en Zigzag)
+                    if(col === 2) {
+                        let fNac = normalizarFecha(buscarDato(p, "fecha ingresada")); 
+                        if (fNac) {
+                            // Cálculo del índice del paciente real para alternar posiciones
+                            let idxPaciente = Math.floor(d.row.index / (tipo === "1-C" ? 1 : 2));
+                            // Operador módulo: Alterna entre un desfase de 0px y 12px hacia arriba
+                            let desfaseVertical = (idxPaciente % 2 === 0) ? 0 : 12; 
+                            
+                            doc.text(String(fNac), d.cell.x + (d.cell.width/2) + 2, d.cell.y + d.cell.height - 2 - desfaseVertical, { angle: 90 });
+                        }
+                    }
+
+                    // Columna 3: EDAD (Horizontal y Abreviada "10 a 5 m")
+                    if(col === 3) {
+                        let edadStr = buscarDato(p, "edad");
+                        let edadAbreviada = abreviarEdad(edadStr);
+                        if (edadAbreviada) {
+                            doc.setFontSize(5); 
+                            // Centrado horizontal aproximado para la celda de edad
+                            doc.text(edadAbreviada, d.cell.x + (d.cell.width/2), d.cell.y + 10, { align: 'center' });
+                            doc.setFontSize(5.5);
+                        }
                     }
 
                     if(col === 4) {
