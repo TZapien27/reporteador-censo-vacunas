@@ -315,16 +315,14 @@ function procesarAnexoBase(tipo, datos, fInit, fEnd, labelRango) {
                         }
                     }
                     
-                    // Columna 2: F.NAC (Rotada a 90° con desplazamiento en Zigzag)
+                    // Columna 2: F.NAC (Renderizado Horizontal y Centrado)
                     if(col === 2) {
                         let fNac = normalizarFecha(buscarDato(p, "fecha ingresada")); 
                         if (fNac) {
-                            // Cálculo del índice del paciente real para alternar posiciones
-                            let idxPaciente = Math.floor(d.row.index / (tipo === "1-C" ? 1 : 2));
-                            // Operador módulo: Alterna entre un desfase de 0px y 12px hacia arriba
-                            let desfaseVertical = (idxPaciente % 2 === 0) ? 0 : 12; 
-                            
-                            doc.text(String(fNac), d.cell.x + (d.cell.width/2) + 2, d.cell.y + d.cell.height - 2 - desfaseVertical, { angle: 90 });
+                            doc.setFontSize(5.5); // Ajuste de fuente para garantizar que la fecha no desborde
+                            // Se elimina el angle: 90 y el cálculo de zigzag. 
+                            // Se posiciona desde arriba (y + 10) y se centra horizontalmente.
+                            doc.text(String(fNac), d.cell.x + (d.cell.width / 2), d.cell.y + 10, { align: 'center' });
                         }
                     }
 
