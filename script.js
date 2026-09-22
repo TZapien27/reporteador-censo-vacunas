@@ -26,14 +26,25 @@ async function validarAcceso() {
     
     if (DATOS_CACHE && DATOS_CACHE.censo) {
         const vacs = new Set(); const regs = new Set();
+        
         DATOS_CACHE.censo.forEach(row => {
-            let v = buscarDato(row, "nombre_vacunador"); if (v) vacs.add(v);
-            let r = buscarDato(row, "registrador_nombre"); if (r) regs.add(r);
+            let v = buscarDato(row, "nombre de vacunador");
+            if (v && String(v).trim() !== "") vacs.add(String(v).trim());
+            
+            let r = buscarDato(row, "registrador_nombre");
+            if (r && String(r).trim() !== "") regs.add(String(r).trim());
         });
+        
         const sVac = document.getElementById("filtro-vacunador");
         const sReg = document.getElementById("filtro-registrador");
-        vacs.forEach(val => sVac.add(new Option(val, val)));
-        regs.forEach(val => sReg.add(new Option(val, val)));
+        
+        // Limpiar opciones anteriores por si el usuario recarga la BD, conservando la opción "-- Todos --"
+        sVac.options.length = 1; 
+        sReg.options.length = 1;
+        
+        // Convertir el Set a Array, ordenar alfabéticamente e inyectar en el DOM
+        [...vacs].sort().forEach(val => sVac.add(new Option(val, val)));
+        [...regs].sort().forEach(val => sReg.add(new Option(val, val)));
     }
     document.querySelector(".panel-acciones .btn-principal").innerText = "Generar Reporte Seleccionado";
 }
@@ -135,17 +146,13 @@ function buscarFechaVacuna(filasVacunas, keyVacuna) {
 async function ejecutarGeneracionPorFiltros() {
     const btn = document.querySelector(".panel-acciones .btn-principal");
     
-    // 1. INICIO DEL ESCUDO DE EXCEPCIONES
     try {
         const tipoRep = document.getElementById("filtro-tipo").value;
         const fInit = document.getElementById("filtro-fecha-inicio").value;
         let fEnd = document.getElementById("filtro-fecha-fin").value;
 
-        // Validar fechas excepto para bloqueos
-        if (!fInit && tipoRep !== "bloqueo") {
-            alert("❌ Seleccione Fecha Inicial para este tipo de reporte.");
-            return;
-        }
+        // Se ELIMINA la restricción estricta de requerir fecha. 
+        // Ahora, si fInit está vacío, se asume extracción histórica total.
         if (!fEnd && fInit) fEnd = fInit; 
 
         const vac = document.getElementById("filtro-vacunador").value;
@@ -157,27 +164,40 @@ async function ejecutarGeneracionPorFiltros() {
         
         const datosBD = await obtenerDatosDesdeGoogle();
         
-        // 2. VALIDACIÓN ESTRICTA DE RESPUESTA DE GOOGLE
-        if (!datosBD) throw new Error("No se recibió respuesta del servidor de Google Apps Script.");
-        if (datosBD.error) throw new Error("Error interno del servidor: " + datosBD.error);
+        if (!datosBD) throw new Error("No se recibió respuesta del servidor.");
+        if (datosBD.error) throw new Error("Error interno: " + datosBD.error);
         
-        // 3. BLINDAJE DE ARREGLOS (Previene que un 'undefined' mate el código)
         const censoSeguro = datosBD.censo || [];
         const vacunasSeguras = datosBD.historial_vacunas || [];
         
-        if (censoSeguro.length === 0) throw new Error("La hoja de Censo está vacía o no se pudo leer correctamente.");
+        if (censoSeguro.length === 0) throw new Error("La hoja de Censo está vacía.");
 
         const pacientesFiltrados = censoSeguro.filter(p => {
             let fAct = normalizarFecha(buscarDato(p, "fecha de la actividad"));
             let instReg = String(buscarDato(p, "registrador_institucion")).toUpperCase(); 
 
+            // 1. FLEXIBILIDAD DE FECHAS: Si no hay fecha de inicio, pasa en automático
             let matchFecha = true;
-            if (fInit) matchFecha = (fAct >= fInit && fAct <= fEnd);
+            if (fInit) {
+                matchFecha = (fAct >= fInit && fAct <= fEnd);
+            }
 
-            let matchVac = vac ? (buscarDato(p, "nombre de vacunador").includes(vac)) : true; 
-            let matchReg = reg ? (buscarDato(p, "registrador_nombre").includes(reg)) : true; 
+            // 2. FILTRADO ESTRICTO POR SELECTORES DE PERSONAL
+            // Se usa "===" para coincidencia exacta con el dropdown y evitar falsos positivos
+            let nombreVacBD = String(buscarDato(p, "nombre de vacunador")).trim();
+            let nombreRegBD = String(buscarDato(p, "registrador_nombre")).trim();
+            
+            let matchVac = vac ? (nombreVacBD === vac) : true; 
+            let matchReg = reg ? (nombreRegBD === reg) : true; 
             let matchCaso = caso ? (buscarDato(p, "nombre del caso").toLowerCase().includes(caso)) : true; 
-            let matchInst = (instSeleccionada === "TODAS" || tipoRep === "bloqueo") ? true : instReg.includes(instSeleccionada); 
+            
+            // 3. COMPUERTA TEMPORAL DE INSTITUCIÓN (BYPASS HISTÓRICO)
+            // Cualquier registro capturado antes del 10 de Septiembre de 2026 pasa sin importar la institución
+            let esRegistroAntiguo = (fAct !== "" && fAct < "2026-09-10");
+            
+            let matchInst = (instSeleccionada === "TODAS" || tipoRep === "bloqueo" || esRegistroAntiguo) 
+                            ? true 
+                            : instReg.includes(instSeleccionada); 
 
             return matchFecha && matchVac && matchReg && matchCaso && matchInst;
         });
