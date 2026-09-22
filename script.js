@@ -584,12 +584,9 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     unificados.forEach(p => {
         let edadAnios = parseEdadEnAnios(buscarDato(p, "edad"));
         
-        // ESCUDO LÓGICO: Si la edad devolvió -1 (vacía o corrupta), 
-        // interrumpe la iteración de este paciente para no inflar los menores de 1.
         if (edadAnios === -1) return; 
 
         let bk = "";
-        
         if (edadAnios < 1) bk = "menores 1 @"; 
         else if (edadAnios <= 4) bk = "1-4 @"; 
         else if (edadAnios <= 9) bk = "5-9 @"; 
@@ -606,6 +603,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         if (sx === "M") matriz[bk].m++; else if (sx === "F") matriz[bk].f++;
 
         let cartilla = false;
+        let recibioSRPSRHoy = false; // VARIABLE DE ANULACIÓN LÓGICA
         let fechaActividadPaciente = normalizarFecha(buscarDato(p, "fecha de la actividad"));
 
         p._historialVacunas.forEach(v => {
@@ -619,13 +617,19 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
             
             // Aplicación en la actividad actual
             if (fV !== "" && fV === fechaActividadPaciente) { 
-                totalDosisGeneral++; // Suma a la tabla general de vacunas
+                totalDosisGeneral++; 
 
-                // Restricción por Edad solicitada para SRP y SR
-                if (nV.includes("SRP") && edadAnios < 10) matriz[bk].srp++;
-                if (nV.includes("SR") && !nV.includes("SRP") && edadAnios >= 10) matriz[bk].sr++;
+                // Restricción por Edad y Activación de la Anulación
+                if (nV.includes("SRP") && edadAnios < 10) {
+                    matriz[bk].srp++;
+                    recibioSRPSRHoy = true;
+                }
+                if (nV.includes("SR") && !nV.includes("SRP") && edadAnios >= 10) {
+                    matriz[bk].sr++;
+                    recibioSRPSRHoy = true;
+                }
 
-                // Para el Desglose Global (Tabla derecha superior)
+                // Desglose Global de Vacunas
                 if (nV.includes("HEXA")) conteoVacs.hexa++;
                 else if (nV.includes("ROTA")) conteoVacs.rota++;
                 else if (nV.includes("SRP") || nV.includes("TRIPLE VIRAL")) conteoVacs.srp++;
@@ -645,6 +649,11 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
             }
         });
         
+        // REGLA DE NEGOCIO: Si recibió SRP o SR hoy, cuenta obligatoriamente como SIN ANTECEDENTE
+        if (recibioSRPSRHoy) {
+            cartilla = false;
+        }
+
         if (cartilla) matriz[bk].cA++; else matriz[bk].sA++;
     });
 
@@ -707,34 +716,16 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     // 7. TABLA DE POBLACIÓN ENCUESTADA (Abajo)
     let keys = Object.keys(matriz);
     let sTot=0, sMasc=0, sFem=0, sCa=0, sSa=0, sSrp=0, sSr=0, sDos=0;
-    
-    // Variables para la suma literal de los porcentajes requerida por el formato
-    let sumProv = 0, sumEnc = 0;
-    
-    // Variables aisladas para el promedio de Cobertura Final
-    let sumFinalAverages = 0, validFinalAverages = 0; 
 
     const tablaPoblacion = keys.map(k => {
         let r = matriz[k];
         let dosis = r.srp + r.sr;
         
-        // Cálculos porcentuales individuales por fila
         let provac = r.t > 0 ? (dosis / r.t) * 100 : 0;
         let encuesta = r.t > 0 ? (r.cA / r.t) * 100 : 0;
         let final = provac + encuesta;
 
-        // Acumuladores de columnas estándar (Sumas)
         sTot+=r.t; sMasc+=r.m; sFem+=r.f; sCa+=r.cA; sSa+=r.sA; sSrp+=r.srp; sSr+=r.sr; sDos+=dosis;
-        
-        // Acumuladores porcentuales (Suma literal de los porcentajes arrojados por fila)
-        sumProv += provac; 
-        sumEnc += encuesta;
-
-        // Evaluación para el Promedio exclusivo de Cobertura Final
-        if (r.t > 0) {
-            sumFinalAverages += final;
-            validFinalAverages++;
-        }
 
         return [
             k, r.t, r.m, r.f, r.cA, r.sA, r.srp, r.sr, dosis, 
@@ -744,18 +735,18 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         ];
     });
 
-    // Cálculo del promedio aislando las filas sin población para no diluir el dato
-    let promedioFinal = validFinalAverages > 0 ? (sumFinalAverages / validFinalAverages) : 0;
+    // CÁLCULOS PONDERADOS PARA LA FILA TOTAL
+    let totalProvacGeneral = sTot > 0 ? (sDos / sTot) * 100 : 0;
+    let totalEncuestaGeneral = sTot > 0 ? (sCa / sTot) * 100 : 0;
+    let totalCoberturaFinalGeneral = totalProvacGeneral + totalEncuestaGeneral;
 
-    // Fila Total: Regla estricta de sumas para todas las columnas, excepto Cobertura Final (Promedio)
     tablaPoblacion.push([
         "TOTAL", sTot, sMasc, sFem, sCa, sSa, sSrp, sSr, sDos, 
-        sumProv.toFixed(2) + "%", 
-        sumEnc.toFixed(2) + "%", 
-        promedioFinal.toFixed(2) + "%"
+        totalProvacGeneral.toFixed(2) + "%", 
+        totalEncuestaGeneral.toFixed(2) + "%", 
+        totalCoberturaFinalGeneral.toFixed(2) + "%"
     ]);
 
-    // Asegurar que la tabla inicie respetando el alto dinámico de las 3 tablas superiores
     let YTablasSuperiores = Math.max(doc.previousAutoTable.finalY, startYTablas + 120);
 
     doc.autoTable({
