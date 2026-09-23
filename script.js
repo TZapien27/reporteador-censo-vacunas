@@ -53,46 +53,41 @@ async function validarAcceso() {
     
     // UBICACIÓN: script.js -> En la función validarAcceso() -> if (DATOS_CACHE && DATOS_CACHE.censo) {
 
+    // UBICACIÓN: script.js -> En la función validarAcceso()
+
     if (DATOS_CACHE && DATOS_CACHE.censo) {
         const vacs = new Set(); 
         const regs = new Set();
-        const casosCerrados = new Set(); // Nuevo Set matemático para bloqueos terminados
+        const casosCerrados = new Set(); 
+        
+        // 1. Capturar la institución del usuario autenticado
+        const instUsuario = document.getElementById("filtro-institucion").value.toUpperCase();
         
         DATOS_CACHE.censo.forEach(row => {
-            let v = buscarDato(row, "nombre de vacunador");
-            if (v && String(v).trim() !== "") vacs.add(String(v).trim());
+            let instReg = String(buscarDato(row, "registrador_institucion")).toUpperCase();
             
-            let r = buscarDato(row, "registrador_nombre");
-            if (r && String(r).trim() !== "") regs.add(String(r).trim());
+            // 2. Escudo Lógico Institucional (RBAC)
+            // Si el usuario es de nivel central (TODAS) o la fila pertenece a su institución, procesa.
+            let perteneceInstitucion = (instUsuario === "TODAS" || instReg.includes(instUsuario));
+            
+            if (perteneceInstitucion) {
+                let v = buscarDato(row, "nombre de vacunador");
+                if (v && String(v).trim() !== "") vacs.add(String(v).trim());
+                
+                let r = buscarDato(row, "registrador_nombre");
+                if (r && String(r).trim() !== "") regs.add(String(r).trim());
 
-            // Detección de Bloqueo Terminado
-            let esCierre = String(buscarDato(row, "último registro")).toLowerCase().includes("s");
-            let nombreCaso = buscarDato(row, "nombre del caso");
-            
-            // Si la fila marca cierre y tiene un nombre de caso válido, se envía al Set
-            if (esCierre && nombreCaso && String(nombreCaso).trim() !== "") {
-                casosCerrados.add(String(nombreCaso).trim());
+                // Detección de Bloqueo Terminado
+                let esCierre = String(buscarDato(row, "último registro")).toLowerCase().includes("s");
+                let nombreCaso = buscarDato(row, "nombre del caso");
+                
+                if (esCierre && nombreCaso && String(nombreCaso).trim() !== "") {
+                    casosCerrados.add(String(nombreCaso).trim());
+                }
             }
         });
         
-        const sVac = document.getElementById("filtro-vacunador");
-        const sReg = document.getElementById("filtro-registrador");
-        const sCaso = document.getElementById("filtro-caso"); 
-        
-        // Limpieza de opciones (conservando el índice 0 "-- Seleccione --")
-        sVac.options.length = 1; 
-        sReg.options.length = 1;
-        if (sCaso) sCaso.options.length = 1; 
-        
-        // Convertir Sets a Arrays, ordenar e inyectar al DOM
-        [...vacs].sort().forEach(val => sVac.add(new Option(val, val)));
-        [...regs].sort().forEach(val => sReg.add(new Option(val, val)));
-        
-        // Llenar el select de casos ÚNICAMENTE con los casos que pasaron la validación de cierre
-        if (sCaso) {
-            [...casosCerrados].sort().forEach(val => sCaso.add(new Option(val, val)));
-        }
-    }
+        // ... (A partir de aquí se mantiene tu código que inyecta los arrays ordenados en los <select>)
     document.querySelector(".panel-acciones .btn-principal").innerText = "Generar Reporte Seleccionado";
 }
 
@@ -219,6 +214,10 @@ async function ejecutarGeneracionPorFiltros() {
         if (datosBD.error) throw new Error("Error interno: " + datosBD.error);
         
         const censoSeguro = datosBD.censo || [];
+        
+        // CORRECCIÓN: Declaración y asignación de la matriz de vacunas faltante
+        const vacunasSeguras = datosBD.historial_vacunas || []; 
+        
         if (censoSeguro.length === 0) throw new Error("La hoja de Censo está vacía.");
 
         const pacientesFiltrados = censoSeguro.filter(p => {
@@ -239,9 +238,9 @@ async function ejecutarGeneracionPorFiltros() {
             // Coincidencia estricta (===) para evitar cruces de datos entre casos con nombres similares
             let matchCaso = casoSeleccionado ? (buscarDato(p, "nombre del caso").trim() === casoSeleccionado) : true; 
             
-            let matchInst = (instSeleccionada === "TODAS" || tipoRep === "bloqueo") 
+            let matchInst = (instSeleccionada === "TODAS") 
                             ? true 
-                            : instReg.includes(instSeleccionada); 
+                            : instReg.includes(instSeleccionada);
 
             return matchFecha && matchVac && matchReg && matchCaso && matchInst;
         });
