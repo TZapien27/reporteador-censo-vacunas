@@ -51,33 +51,38 @@ async function validarAcceso() {
     document.querySelector(".panel-acciones .btn-principal").innerText = "Sincronizando Base de Datos...";
     DATOS_CACHE = await obtenerDatosDesdeGoogle();
     
-    // UBICACIÓN: script.js -> En la función validarAcceso() -> if (DATOS_CACHE && DATOS_CACHE.censo) {
-
-    // UBICACIÓN: script.js -> En la función validarAcceso()
-
     if (DATOS_CACHE && DATOS_CACHE.censo) {
         const vacs = new Set(); 
         const regs = new Set();
         const casosCerrados = new Set(); 
         
-        // 1. Capturar la institución del usuario autenticado
-        const instUsuario = document.getElementById("filtro-institucion").value.toUpperCase();
+        // 1. CORRECCIÓN CRÍTICA: Extraer la institución desde el selector del LOGIN, no del dashboard
+        const instSelectorLogin = document.getElementById("login-institucion");
+        const instUsuario = instSelectorLogin ? instSelectorLogin.value.toUpperCase() : "";
         
+        // 2. Sincronizar el dashboard inyectando el valor capturado para que los reportes posteriores lo lean
+        const inputFiltroInst = document.getElementById("filtro-institucion");
+        if (inputFiltroInst) {
+            inputFiltroInst.value = instUsuario;
+        }
+        
+        // 3. Escaneo y Filtrado RBAC
         DATOS_CACHE.censo.forEach(row => {
             let instReg = String(buscarDato(row, "registrador_institucion")).toUpperCase();
             
-            // 2. Escudo Lógico Institucional (RBAC)
-            // Si el usuario es de nivel central (TODAS) o la fila pertenece a su institución, procesa.
-            let perteneceInstitucion = (instUsuario === "TODAS" || instReg.includes(instUsuario));
+            // Escudo lógico: Permite el paso si es administrador (TODAS), si la institución coincide, 
+            // o si el campo quedó vacío por diseño.
+            let perteneceInstitucion = (instUsuario === "TODAS" || instReg.includes(instUsuario) || instUsuario === "");
             
             if (perteneceInstitucion) {
+                // Poblado de Vacunadores y Registradores autorizados para esta institución
                 let v = buscarDato(row, "nombre de vacunador");
                 if (v && String(v).trim() !== "") vacs.add(String(v).trim());
                 
                 let r = buscarDato(row, "registrador_nombre");
                 if (r && String(r).trim() !== "") regs.add(String(r).trim());
 
-                // Detección de Bloqueo Terminado
+                // Detección de Casos de Bloqueo Terminados
                 let esCierre = String(buscarDato(row, "último registro")).toLowerCase().includes("s");
                 let nombreCaso = buscarDato(row, "nombre del caso");
                 
@@ -87,7 +92,25 @@ async function validarAcceso() {
             }
         });
         
-        // ... (A partir de aquí se mantiene tu código que inyecta los arrays ordenados en los <select>)
+        // 4. Inyección de opciones en los selectores del DOM de forma segura
+        const sVac = document.getElementById("filtro-vacunador");
+        const sReg = document.getElementById("filtro-registrador");
+        const sCaso = document.getElementById("filtro-caso"); 
+        
+        if (sVac) { 
+            sVac.options.length = 1; 
+            [...vacs].sort().forEach(val => sVac.add(new Option(val, val))); 
+        }
+        if (sReg) { 
+            sReg.options.length = 1; 
+            [...regs].sort().forEach(val => sReg.add(new Option(val, val))); 
+        }
+        if (sCaso) { 
+            sCaso.options.length = 1; 
+            [...casosCerrados].sort().forEach(val => sCaso.add(new Option(val, val))); 
+        }
+    }
+
     document.querySelector(".panel-acciones .btn-principal").innerText = "Generar Reporte Seleccionado";
 }
 
