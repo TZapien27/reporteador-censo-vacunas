@@ -6,6 +6,33 @@ const USUARIOS_SISTEMA = [
     { usr: "operador", pass: "imss2026", inst: "IMSS" }
 ];
 
+document.addEventListener("DOMContentLoaded", () => {
+    const selectTipo = document.getElementById("filtro-tipo");
+    const contenedorCaso = document.getElementById("contenedor-filtro-caso");
+    const selectCaso = document.getElementById("filtro-caso");
+    
+    // Escudo lógico: Solo aplica la interactividad si los elementos existen en el HTML
+    if (selectTipo && contenedorCaso) {
+        
+        // 1. Inyección de reactividad segura
+        selectTipo.addEventListener("change", (e) => {
+            if (e.target.value === "bloqueo") {
+                contenedorCaso.style.display = "block"; // Revela el desplegable
+            } else {
+                contenedorCaso.style.display = "none";  // Oculta el desplegable
+                if (selectCaso) selectCaso.value = "";  // Limpia el valor residual
+            }
+        });
+        
+        // 2. Sincronización del estado inicial (Previene desincronización al refrescar con F5)
+        if (selectTipo.value === "bloqueo") {
+            contenedorCaso.style.display = "block";
+        } else {
+            contenedorCaso.style.display = "none";
+        }
+    }
+});
+
 let DATOS_CACHE = null;
 
 async function validarAcceso() {
@@ -805,19 +832,4 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     let fName = (fInit && fEnd && fInit !== fEnd) ? `${fInit}_${fEnd}` : (fInit ? fInit : "Historico");
     doc.save(`Bloqueo_Vacunal_${fName}.pdf`);
     alert("✅ Formato de Bloqueo generado exitosamente.");
-
-    // UBICACIÓN: script.js -> En la raíz del archivo o dentro de tu window.onload
-
-    document.getElementById("filtro-tipo").addEventListener("change", function(e) {
-        const contenedorCaso = document.getElementById("contenedor-filtro-caso");
-        const selectCaso = document.getElementById("filtro-caso");
-        
-        // Asumiendo que el value de tu opción de bloqueo en el select principal es "bloqueo"
-        if (e.target.value === "bloqueo") {
-            contenedorCaso.style.display = "block"; // Revela el desplegable
-        } else {
-            contenedorCaso.style.display = "none";  // Oculta el desplegable
-            selectCaso.value = "";                  // Limpia la selección para no afectar otros reportes
-        }
-    });
 }
