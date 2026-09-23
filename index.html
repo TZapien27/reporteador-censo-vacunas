@@ -54,11 +54,13 @@
                 <label>Registrador</label>
                 <select id="filtro-registrador"><option value="">-- Todos --</option></select>
             </div>
-            <div class="filtro-grupo">
-                <label>Nombre del Caso / Identificador</label>
-                <input type="text" id="filtro-caso" placeholder="Ej. Caso Sospechoso X">
+            <div class="filtro-grupo" id="contenedor-filtro-caso" style="display: none;">
+                <label for="filtro-caso">Seleccionar Caso (Bloqueo Terminado)</label>
+                <select id="filtro-caso">
+                    <option value="">-- Seleccione un Caso --</option>
+                </select>
             </div>
-            <div class="filtro-grupo">
+                        <div class="filtro-grupo">
                 <label>Fecha Inicial / Única</label>
                 <input type="date" id="filtro-fecha-inicio">
             </div>

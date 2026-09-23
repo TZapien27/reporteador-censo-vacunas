@@ -24,8 +24,12 @@ async function validarAcceso() {
     document.querySelector(".panel-acciones .btn-principal").innerText = "Sincronizando Base de Datos...";
     DATOS_CACHE = await obtenerDatosDesdeGoogle();
     
+    // UBICACIÓN: script.js -> En la función validarAcceso() -> if (DATOS_CACHE && DATOS_CACHE.censo) {
+
     if (DATOS_CACHE && DATOS_CACHE.censo) {
-        const vacs = new Set(); const regs = new Set();
+        const vacs = new Set(); 
+        const regs = new Set();
+        const casosCerrados = new Set(); // Nuevo Set matemático para bloqueos terminados
         
         DATOS_CACHE.censo.forEach(row => {
             let v = buscarDato(row, "nombre de vacunador");
@@ -33,18 +37,34 @@ async function validarAcceso() {
             
             let r = buscarDato(row, "registrador_nombre");
             if (r && String(r).trim() !== "") regs.add(String(r).trim());
+
+            // Detección de Bloqueo Terminado
+            let esCierre = String(buscarDato(row, "último registro")).toLowerCase().includes("s");
+            let nombreCaso = buscarDato(row, "nombre del caso");
+            
+            // Si la fila marca cierre y tiene un nombre de caso válido, se envía al Set
+            if (esCierre && nombreCaso && String(nombreCaso).trim() !== "") {
+                casosCerrados.add(String(nombreCaso).trim());
+            }
         });
         
         const sVac = document.getElementById("filtro-vacunador");
         const sReg = document.getElementById("filtro-registrador");
+        const sCaso = document.getElementById("filtro-caso"); 
         
-        // Limpiar opciones anteriores por si el usuario recarga la BD, conservando la opción "-- Todos --"
+        // Limpieza de opciones (conservando el índice 0 "-- Seleccione --")
         sVac.options.length = 1; 
         sReg.options.length = 1;
+        if (sCaso) sCaso.options.length = 1; 
         
-        // Convertir el Set a Array, ordenar alfabéticamente e inyectar en el DOM
+        // Convertir Sets a Arrays, ordenar e inyectar al DOM
         [...vacs].sort().forEach(val => sVac.add(new Option(val, val)));
         [...regs].sort().forEach(val => sReg.add(new Option(val, val)));
+        
+        // Llenar el select de casos ÚNICAMENTE con los casos que pasaron la validación de cierre
+        if (sCaso) {
+            [...casosCerrados].sort().forEach(val => sCaso.add(new Option(val, val)));
+        }
     }
     document.querySelector(".panel-acciones .btn-principal").innerText = "Generar Reporte Seleccionado";
 }
@@ -142,7 +162,8 @@ function buscarFechaVacuna(filasVacunas, keyVacuna) {
     return "";
 }
 
-// 3. ENRUTADOR PRINCIPAL DE GENERACIÓN
+// UBICACIÓN: script.js -> En la función ejecutarGeneracionPorFiltros()
+
 async function ejecutarGeneracionPorFiltros() {
     const btn = document.querySelector(".panel-acciones .btn-principal");
     
@@ -150,52 +171,48 @@ async function ejecutarGeneracionPorFiltros() {
         const tipoRep = document.getElementById("filtro-tipo").value;
         const fInit = document.getElementById("filtro-fecha-inicio").value;
         let fEnd = document.getElementById("filtro-fecha-fin").value;
-
-        // Se ELIMINA la restricción estricta de requerir fecha. 
-        // Ahora, si fInit está vacío, se asume extracción histórica total.
         if (!fEnd && fInit) fEnd = fInit; 
 
         const vac = document.getElementById("filtro-vacunador").value;
         const reg = document.getElementById("filtro-registrador").value;
-        const caso = document.getElementById("filtro-caso").value.toLowerCase();
+        
+        // Ahora captura el valor exacto del desplegable
+        const casoSeleccionado = document.getElementById("filtro-caso").value; 
         const instSeleccionada = document.getElementById("filtro-institucion").value;
+        
+        // REGLA DE NEGOCIO: Bloqueo de ejecución si falta el parámetro obligatorio
+        if (tipoRep === "bloqueo" && !casoSeleccionado) {
+            throw new Error("Debe seleccionar un Caso (Bloqueo Terminado) del menú para generar este reporte.");
+        }
         
         btn.innerText = "Procesando Datos...";
         
         const datosBD = await obtenerDatosDesdeGoogle();
-        
         if (!datosBD) throw new Error("No se recibió respuesta del servidor.");
         if (datosBD.error) throw new Error("Error interno: " + datosBD.error);
         
         const censoSeguro = datosBD.censo || [];
-        const vacunasSeguras = datosBD.historial_vacunas || [];
-        
         if (censoSeguro.length === 0) throw new Error("La hoja de Censo está vacía.");
 
         const pacientesFiltrados = censoSeguro.filter(p => {
             let fAct = normalizarFecha(buscarDato(p, "fecha de la actividad"));
             let instReg = String(buscarDato(p, "registrador_institucion")).toUpperCase(); 
 
-            // 1. FLEXIBILIDAD DE FECHAS: Si no hay fecha de inicio, pasa en automático
             let matchFecha = true;
             if (fInit) {
                 matchFecha = (fAct >= fInit && fAct <= fEnd);
             }
 
-            // 2. FILTRADO ESTRICTO POR SELECTORES DE PERSONAL
-            // Se usa "===" para coincidencia exacta con el dropdown y evitar falsos positivos
             let nombreVacBD = String(buscarDato(p, "nombre de vacunador")).trim();
             let nombreRegBD = String(buscarDato(p, "registrador_nombre")).trim();
             
             let matchVac = vac ? (nombreVacBD === vac) : true; 
             let matchReg = reg ? (nombreRegBD === reg) : true; 
-            let matchCaso = caso ? (buscarDato(p, "nombre del caso").toLowerCase().includes(caso)) : true; 
             
-            // 3. COMPUERTA TEMPORAL DE INSTITUCIÓN (BYPASS HISTÓRICO)
-            // Cualquier registro capturado antes del 10 de Septiembre de 2026 pasa sin importar la institución
-            let esRegistroAntiguo = (fAct !== "" && fAct < "2026-09-10");
+            // Coincidencia estricta (===) para evitar cruces de datos entre casos con nombres similares
+            let matchCaso = casoSeleccionado ? (buscarDato(p, "nombre del caso").trim() === casoSeleccionado) : true; 
             
-            let matchInst = (instSeleccionada === "TODAS" || tipoRep === "bloqueo" || esRegistroAntiguo) 
+            let matchInst = (instSeleccionada === "TODAS" || tipoRep === "bloqueo") 
                             ? true 
                             : instReg.includes(instSeleccionada); 
 
@@ -788,4 +805,19 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     let fName = (fInit && fEnd && fInit !== fEnd) ? `${fInit}_${fEnd}` : (fInit ? fInit : "Historico");
     doc.save(`Bloqueo_Vacunal_${fName}.pdf`);
     alert("✅ Formato de Bloqueo generado exitosamente.");
+
+    // UBICACIÓN: script.js -> En la raíz del archivo o dentro de tu window.onload
+
+    document.getElementById("filtro-tipo").addEventListener("change", function(e) {
+        const contenedorCaso = document.getElementById("contenedor-filtro-caso");
+        const selectCaso = document.getElementById("filtro-caso");
+        
+        // Asumiendo que el value de tu opción de bloqueo en el select principal es "bloqueo"
+        if (e.target.value === "bloqueo") {
+            contenedorCaso.style.display = "block"; // Revela el desplegable
+        } else {
+            contenedorCaso.style.display = "none";  // Oculta el desplegable
+            selectCaso.value = "";                  // Limpia la selección para no afectar otros reportes
+        }
+    });
 }
