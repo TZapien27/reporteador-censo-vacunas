@@ -7,26 +7,27 @@
 </head>
 <body>
 
+    <!-- 1. NUEVO HEADER OFICIAL REPORTES (Blindado contra compresión Flexbox) -->
     <header class="header-oficial" style="display: flex; flex-direction: column; width: 100%; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
         <div class="pleca-guinda" style="height: 6px; background-color: #9f2241; width: 100%;"></div>
-        <div class="header-contenido" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; background-color: #ffffff;">
+        <div class="header-contenido" style="display: flex; justify-content: space-between; align-items: center; padding: 10px 20px; background-color: #ffffff; flex-wrap: nowrap;">
             
-            <!-- UBICACIÓN: index.html -> Dentro del <header class="header-oficial"> -->
-            <div class="logos-izq" style="display: flex; align-items: center; gap: 15px;">
-                <img src="./img/logo-ss-fed.jpg" alt="Salud Federal" style="height: 45px; width: auto; object-fit: contain;">
-                <img src="./img/logo-ss-coahuila.jpg" alt="Salud Coahuila" style="height: 45px; width: auto; object-fit: contain;">
-                <img src="./img/logo-coahuila.jpg" alt="Gobierno Coahuila" style="height: 45px; width: auto; object-fit: contain;">
+            <div class="logos-izq" style="display: flex; align-items: center; gap: 15px; flex-shrink: 0;">
+                <img src="logo SS Fed pequeño.jpg" alt="Salud Federal" style="height: 45px; width: auto; object-fit: contain;">
+                <img src="logoSS.jpg" alt="Salud Coahuila" style="height: 45px; width: auto; object-fit: contain;">
+                <img src="logoCoahuila.jpg" alt="Gobierno Coahuila" style="height: 45px; width: auto; object-fit: contain;">
             </div>
             
-            <div class="texto-central" style="text-align: center; font-family: Arial, sans-serif;">
+            <div class="texto-central" style="text-align: center; font-family: Arial, sans-serif; flex-grow: 1; padding: 0 15px;">
                 <h1 style="margin: 0; font-size: 1.3rem; color: #333; letter-spacing: 0.5px;">MiVacuna Digital Coahuila</h1>
                 <span class="version-app" style="color: #d32f2f; font-weight: 900; font-size: 1.1rem;">v-7.2</span>
             </div>
-
-            <div class="logos-der" style="display: flex; align-items: center;">
-                <img src="./img/logo-snsp.jpg" alt="SNSP" style="height: 50px; width: auto; object-fit: contain;">
+            
+            <div class="logos-der" style="display: flex; align-items: center; flex-shrink: 0;">
+                <!-- Escudo de compresión: flex-shrink: 0 y min-width garantizan que no se recorte -->
+                <img src="logo SNSP chico.jpg" alt="SNSP" style="height: 50px; width: auto; min-width: 140px; object-fit: contain; flex-shrink: 0;">
             </div>
-
+            
         </div>
     </header>
 

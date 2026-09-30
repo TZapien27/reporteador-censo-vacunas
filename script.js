@@ -36,38 +36,61 @@ document.addEventListener("DOMContentLoaded", () => {
 let DATOS_CACHE = null;
 
 // UBICACIÓN: script.js -> Reemplaza toda la función validarAcceso()
+// UBICACIÓN: script.js -> Reemplaza toda la función validarAcceso()
+
 async function validarAcceso() {
-    // 1. Lectura segura desde los elementos de Login
-    const u = document.getElementById("login-usuario").value.trim();
-    const p = document.getElementById("login-password").value.trim();
-    const instSelectorLogin = document.getElementById("login-institucion");
-    const i = instSelectorLogin ? instSelectorLogin.value : "";
+    try {
+        // 1. Lectura segura (Previene errores si el DOM aún no carga al 100%)
+        const inputU = document.getElementById("login-usuario");
+        const inputP = document.getElementById("login-password");
+        const inputI = document.getElementById("login-institucion");
 
-    // 2. Validación estricta de credenciales
-    const valido = USUARIOS_SISTEMA.find(x => x.usr === u && x.pass === p && x.inst === i);
-    if (!valido) return alert("❌ Credenciales inválidas o Institución incorrecta.");
+        if (!inputU || !inputP || !inputI) {
+            throw new Error("No se encontraron los campos de login en la interfaz.");
+        }
 
-    // 3. Transición de UI (Ocultar Login -> Mostrar Dashboard)
-    document.getElementById("seccion-login").classList.add("oculto");
-    document.getElementById("seccion-dashboard").classList.remove("oculto");
-    
-    // 4. Inyección del valor validado al dashboard para reportes
-    const inputFiltroInst = document.getElementById("filtro-institucion");
-    if (inputFiltroInst) {
-        inputFiltroInst.value = valido.inst;
-    }
+        // Se aplica toLowerCase() al usuario para evitar rechazos por escribir "Admin" en vez de "admin"
+        const u = inputU.value.trim().toLowerCase(); 
+        const p = inputP.value.trim();
+        const i = inputI.value;
 
-    const btn = document.querySelector(".panel-acciones .btn-principal");
-    if (btn) btn.innerText = "Sincronizando Base de Datos...";
-    
-    // 5. Carga y Filtrado en Caché
-    DATOS_CACHE = await obtenerDatosDesdeGoogle();
-    
-    if (DATOS_CACHE && DATOS_CACHE.censo) {
+        if (u === "" || p === "" || i === "") {
+            alert("⚠️ Por favor, llena todos los campos y selecciona tu institución.");
+            return;
+        }
+
+        // 2. Validación de credenciales
+        const valido = USUARIOS_SISTEMA.find(x => x.usr.toLowerCase() === u && x.pass === p && x.inst === i);
+        
+        if (!valido) {
+            alert(`❌ Acceso denegado. Tus datos no coinciden.\n\nIntentaste con:\nUsuario: ${u}\nInstitución: ${i}`);
+            return; // Detiene la ejecución aquí si no es válido
+        }
+
+        // 3. Transición de UI (Ocultar Login -> Mostrar Dashboard)
+        document.getElementById("seccion-login").classList.add("oculto");
+        document.getElementById("seccion-dashboard").classList.remove("oculto");
+        
+        // 4. Inyección del valor validado al dashboard para reportes
+        const inputFiltroInst = document.getElementById("filtro-institucion");
+        if (inputFiltroInst) {
+            inputFiltroInst.value = valido.inst;
+        }
+
+        const btn = document.querySelector(".panel-acciones .btn-principal");
+        if (btn) btn.innerText = "Sincronizando Base de Datos... (Puede tomar unos segundos)";
+        
+        // 5. Carga y Filtrado en Caché
+        DATOS_CACHE = await obtenerDatosDesdeGoogle();
+        
+        // Validación de que los datos realmente llegaron
+        if (!DATOS_CACHE || !DATOS_CACHE.censo) {
+            throw new Error("El servidor de Google Apps Script no devolvió los datos correctamente. Revisa tu conexión a internet.");
+        }
+
         const vacs = new Set(); 
         const regs = new Set();
         const casosTotales = new Set(); 
-        
         const instUsuario = valido.inst.toUpperCase();
         
         DATOS_CACHE.censo.forEach(row => {
@@ -109,9 +132,16 @@ async function validarAcceso() {
             sCaso.options.length = 1; 
             [...casosTotales].sort().forEach(val => sCaso.add(new Option(val, val))); 
         }
+
+        if (btn) btn.innerText = "Generar Reporte Seleccionado";
+
+    } catch (error) {
+        // En caso de que cualquier línea falle, el sistema lo atrapa aquí e informa
+        console.error("Fallo crítico en validación:", error);
+        alert(`Fallo en el sistema: ${error.message}`);
+        const btn = document.querySelector(".panel-acciones .btn-principal");
+        if (btn) btn.innerText = "Error de Conexión. Recarga la página.";
     }
-    
-    if (btn) btn.innerText = "Generar Reporte Seleccionado";
 }
 
 // 1. ESQUEMAS ORIGINALES CENSIA
