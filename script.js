@@ -75,10 +75,10 @@ async function validarAcceso() {
             
             if (perteneceInstitucion) {
                 // Extracción de personal
-                let v = buscarDato(row, "nombre de vacunador");
+                let v = buscarDato(row, "nombre de vacunador") || buscarDato(row, "vacunador");
                 if (v && String(v).trim() !== "") vacs.add(String(v).trim());
-                
-                let r = buscarDato(row, "registrador_nombre");
+
+                let r = buscarDato(row, "registrador_nombre") || buscarDato(row, "nombre del registrador") || buscarDato(row, "registrador_institucion"); 
                 if (r && String(r).trim() !== "") regs.add(String(r).trim());
 
                 // RELAJACIÓN DE REGLA: Extracción de TODOS los casos (sin importar si están cerrados o no)
@@ -514,60 +514,65 @@ function dibujarFormatoBase(doc, data, tipo) {
 
 // 5. INFORME FINAL (Resumen)
 function generarInformeActividad(datosUnificados, fInit, fEnd) {
-    let stats = { fechaJornada: fInit === fEnd ? fInit : `${fInit} a ${fEnd}`, people: datosUnificados.length, totalDoses: 0, masc: 0, fem: 0, grupos: { "1-A": 0, "1-B": 0, "1-C": 0 }, vacunasDetalle: {} };
+    // AJUSTE 1: stats.people inicia en 0 para contarse de forma dinámica
+    let stats = { 
+        fechaJornada: fInit === fEnd ? fInit : `${fInit} a ${fEnd}`, 
+        people: 0, 
+        totalDoses: 0, 
+        masc: 0, 
+        fem: 0, 
+        grupos: { "1-A": 0, "1-B": 0, "1-C": 0 }, 
+        vacunasDetalle: {} 
+    };
     
     datosUnificados.forEach(f => {
+        let historial = f._historialVacunas || [];
+        
+        // ESCUDO LÓGICO 1: Si el paciente no tiene vacunas (ni previas ni actuales), se ignora por completo.
+        if (historial.length === 0) return;
+        
+        // Si superó el escudo, se cuenta estadísticamente a la persona
+        stats.people++;
+
         let catEdad = String(buscarDato(f, "tipo de vacunacion")).toLowerCase();
         let tipo = catEdad.includes("0 a 9") ? "1-A" : catEdad.includes("10 a 19") ? "1-B" : "1-C";
         stats.grupos[tipo]++;
+        
         let s = buscarDato(f, "sexo").toUpperCase().startsWith("M") ? "M" : "F";
         if (s === "M") stats.masc++; else stats.fem++;
 
+        // Extracción de la fecha de la jornada para este paciente específico
+        let fechaActividad = normalizarFecha(buscarDato(f, "fecha de la actividad"));
+
         ESQUEMAS[tipo].forEach(v => {
-            let fv = buscarFechaVacuna(f._historialVacunas, v.key);
-            if (fv >= fInit && fv <= fEnd) { // Entra en el rango de actividad reportada
+            let fv = buscarFechaVacuna(historial, v.key);
+            
+            // ESCUDO LÓGICO 2: Validación estricta de la fecha de aplicación.
+            // Si el usuario puso rango (fInit/fEnd), usa el rango. Si no, exige que sea igual a la fecha de la actividad.
+            let esDosisDeHoy = (fInit && fEnd && fInit !== fEnd) 
+                               ? (fv >= fInit && fv <= fEnd) 
+                               : (fv === fechaActividad || fv === fInit);
+
+            if (fv !== "" && esDosisDeHoy) { 
                 stats.totalDoses++;
-                if(!stats.vacunasDetalle[v.label]) stats.vacunasDetalle[v.label] = { total: 0, F09: 0, F1019: 0, F20: 0, TotalF: 0, M09: 0, M1019: 0, M20: 0, TotalM: 0 };
+                
+                if(!stats.vacunasDetalle[v.label]) {
+                    stats.vacunasDetalle[v.label] = { total: 0, F09: 0, F1019: 0, F20: 0, TotalF: 0, M09: 0, M1019: 0, M20: 0, TotalM: 0 };
+                }
+                
                 let d = stats.vacunasDetalle[v.label];
                 d.total++;
-                if (s === "F") { d.TotalF++; if(tipo==="1-A") d.F09++; else if(tipo==="1-B") d.F1019++; else d.F20++; } 
-                else { d.TotalM++; if(tipo==="1-A") d.M09++; else if(tipo==="1-B") d.M1019++; else d.M20++; }
+                
+                if (s === "F") { 
+                    d.TotalF++; 
+                    if (tipo === "1-A") d.F09++; else if (tipo === "1-B") d.F1019++; else d.F20++; 
+                } else { 
+                    d.TotalM++; 
+                    if (tipo === "1-A") d.M09++; else if (tipo === "1-B") d.M1019++; else d.M20++; 
+                }
             }
         });
     });
-
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('p', 'pt', 'letter');
-    const pW = doc.internal.pageSize.width;
-    
-    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
-    doc.text("CÉDULA DE EVALUACIÓN Y SEGUIMIENTO DIARIO", pW / 2, 90, { align: 'center' });
-    doc.setFontSize(10); doc.setTextColor(0); doc.text(`FECHA DE JORNADA (REGISTRO): ${stats.fechaJornada}`, pW / 2, 105, { align: 'center' });
-    
-    doc.autoTable({
-        startY: 130,
-        head: [['POBLACIÓN ATENDIDA', 'CANTIDAD']],
-        body: [ ['Total de Personas Registradas', stats.people], ['Hombres', stats.masc], ['Mujeres', stats.fem], ['Infantes (0 a 9 años)', stats.grupos["1-A"]], ['Adolescentes (10 a 19 años)', stats.grupos["1-B"]], ['Adultos (20+ años)', stats.grupos["1-C"]] ],
-        theme: 'striped', headStyles: { fillColor: [159, 34, 65] }
-    });
-
-    const bodyVacunas = Object.keys(stats.vacunasDetalle).map(v => {
-        const d = stats.vacunasDetalle[v]; return [v, d.F09, d.F1019, d.F20, d.TotalF, d.M09, d.M1019, d.M20, d.TotalM, d.total];
-    });
-
-    doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.text(`PRODUCTIVIDAD DE BIOLÓGICOS`, 40, doc.lastAutoTable.finalY + 40);
-    doc.autoTable({
-        startY: doc.lastAutoTable.finalY + 50,
-        head: [['VACUNA', 'M 0-9A', 'M 10-19A', 'M 20+A', 'TOTAL M.', 'H 0-9A', 'H 10-19A', 'H 20+A', 'TOTAL H.', 'TOTAL DOSIS']],
-        body: bodyVacunas.length > 0 ? bodyVacunas : [['Ninguna', '0', '0', '0', '0', '0', '0', '0', '0', '0']],
-        theme: 'grid', headStyles: { fillColor: [188, 149, 92], fontSize: 6, halign: 'center' }, styles: { fontSize: 7, halign: 'center' }
-    });
-
-    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
-    doc.text(`GRAN TOTAL DE DOSIS HOY: ${stats.totalDoses}`, 40, doc.lastAutoTable.finalY + 40);
-    doc.save(`Informe_Jornada_${stats.fechaJornada}.pdf`);
-    alert("✅ Informe generado.");
-}
 
 // ==========================================
 // 6. REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL
@@ -603,6 +608,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     // 3. MÉTRICAS OPERATIVAS Y BRIGADAS
     const casasVisitadas = unificados.length; 
     let famAus = 0, casaDes = 0, famRen = 0, lotBal = 0, negocios = 0, cSosp = 0, cProb = 0;
+    let familiasEntrevistadas = 0; // Se inicializa como contador directo
     const brigadasSet = new Set();
 
     unificados.forEach(p => {
@@ -614,6 +620,10 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         if (dom.includes('deshabitada')) casaDes++;
         if (dom.includes('baldio') || dom.includes('baldío')) lotBal++;
         if (dom.includes('negocio')) negocios++;
+
+        if (dom.includes('CN') || dom.includes('SN') || dom.includes('NEGOCIO CON PERSONAS')) {
+            familiasEntrevistadas++;
+        }
 
         if (caso.includes('sospechoso')) cSosp++;
         if (caso.includes('probable')) cProb++;
