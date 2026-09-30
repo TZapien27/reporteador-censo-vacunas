@@ -521,9 +521,11 @@ function dibujarFormatoBase(doc, data, tipo) {
     doc.setFontSize(6); doc.text(`Hoja ${doc.internal.getNumberOfPages()}`, pW - 50, pH - 20);
 }
 
+// ==========================================
 // 5. INFORME FINAL (Resumen)
+// ==========================================
 function generarInformeActividad(datosUnificados, fInit, fEnd) {
-    // AJUSTE 1: stats.people inicia en 0 para contarse de forma dinámica
+    // 1. Inicialización de contadores en 0
     let stats = { 
         fechaJornada: fInit === fEnd ? fInit : `${fInit} a ${fEnd}`, 
         people: 0, 
@@ -534,13 +536,12 @@ function generarInformeActividad(datosUnificados, fInit, fEnd) {
         vacunasDetalle: {} 
     };
     
+    // 2. Poblado Matemático con Escudos
     datosUnificados.forEach(f => {
         let historial = f._historialVacunas || [];
         
-        // ESCUDO LÓGICO 1: Si el paciente no tiene vacunas (ni previas ni actuales), se ignora por completo.
-        if (historial.length === 0) return;
+        if (historial.length === 0) return; // ESCUDO 1: Ignora pacientes sin vacunas
         
-        // Si superó el escudo, se cuenta estadísticamente a la persona
         stats.people++;
 
         let catEdad = String(buscarDato(f, "tipo de vacunacion")).toLowerCase();
@@ -550,19 +551,16 @@ function generarInformeActividad(datosUnificados, fInit, fEnd) {
         let s = buscarDato(f, "sexo").toUpperCase().startsWith("M") ? "M" : "F";
         if (s === "M") stats.masc++; else stats.fem++;
 
-        // Extracción de la fecha de la jornada para este paciente específico
         let fechaActividad = normalizarFecha(buscarDato(f, "fecha de la actividad"));
 
         ESQUEMAS[tipo].forEach(v => {
             let fv = buscarFechaVacuna(historial, v.key);
             
-            // ESCUDO LÓGICO 2: Validación estricta de la fecha de aplicación.
-            // Si el usuario puso rango (fInit/fEnd), usa el rango. Si no, exige que sea igual a la fecha de la actividad.
             let esDosisDeHoy = (fInit && fEnd && fInit !== fEnd) 
                                ? (fv >= fInit && fv <= fEnd) 
                                : (fv === fechaActividad || fv === fInit);
 
-            if (fv !== "" && esDosisDeHoy) { 
+            if (fv !== "" && esDosisDeHoy) {  // ESCUDO 2: Solo suma vacunas aplicadas hoy
                 stats.totalDoses++;
                 
                 if(!stats.vacunasDetalle[v.label]) {
@@ -582,6 +580,48 @@ function generarInformeActividad(datosUnificados, fInit, fEnd) {
             }
         });
     });
+
+    // 3. RENDERIZADO DEL PDF RESTAURADO
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'pt', 'letter');
+    const pW = doc.internal.pageSize.width;
+    
+    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
+    doc.text("CÉDULA DE EVALUACIÓN Y SEGUIMIENTO DIARIO", pW / 2, 90, { align: 'center' });
+    doc.setFontSize(10); doc.setTextColor(0); doc.text(`FECHA DE JORNADA (REGISTRO): ${stats.fechaJornada}`, pW / 2, 105, { align: 'center' });
+    
+    doc.autoTable({
+        startY: 130,
+        head: [['POBLACIÓN ATENDIDA', 'CANTIDAD']],
+        body: [ 
+            ['Total de Personas Registradas', stats.people], 
+            ['Hombres', stats.masc], 
+            ['Mujeres', stats.fem], 
+            ['Infantes (0 a 9 años)', stats.grupos["1-A"]], 
+            ['Adolescentes (10 a 19 años)', stats.grupos["1-B"]], 
+            ['Adultos (20+ años)', stats.grupos["1-C"]] 
+        ],
+        theme: 'striped', headStyles: { fillColor: [159, 34, 65] }
+    });
+
+    const bodyVacunas = Object.keys(stats.vacunasDetalle).map(v => {
+        const d = stats.vacunasDetalle[v]; 
+        return [v, d.F09, d.F1019, d.F20, d.TotalF, d.M09, d.M1019, d.M20, d.TotalM, d.total];
+    });
+
+    doc.setFontSize(12); doc.setFont(undefined, 'bold'); doc.text(`PRODUCTIVIDAD DE BIOLÓGICOS`, 40, doc.lastAutoTable.finalY + 40);
+    doc.autoTable({
+        startY: doc.lastAutoTable.finalY + 50,
+        head: [['VACUNA', 'M 0-9A', 'M 10-19A', 'M 20+A', 'TOTAL M.', 'H 0-9A', 'H 10-19A', 'H 20+A', 'TOTAL H.', 'TOTAL DOSIS']],
+        body: bodyVacunas.length > 0 ? bodyVacunas : [['Ninguna', '0', '0', '0', '0', '0', '0', '0', '0', '0']],
+        theme: 'grid', headStyles: { fillColor: [188, 149, 92], fontSize: 6, halign: 'center' }, styles: { fontSize: 7, halign: 'center' }
+    });
+
+    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
+    doc.text(`GRAN TOTAL DE DOSIS HOY: ${stats.totalDoses}`, 40, doc.lastAutoTable.finalY + 40);
+    doc.save(`Informe_Jornada_${stats.fechaJornada}.pdf`);
+    alert("✅ Informe generado.");
+} 
 
 // ==========================================
 // 6. REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL
@@ -642,7 +682,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
         brigadasSet.add(`${datosGen.caso}_${reg}_${vac}`);
     });
 
-    const familiasEntrevistadas = casasVisitadas - (famAus + casaDes + famRen + lotBal + negocios);
+    //const familiasEntrevistadas = casasVisitadas - (famAus + casaDes + famRen + lotBal + negocios);
 
     // 4. ESTRUCTURAS DE CONTEO (POBLACIÓN Y VACUNAS)
     const matriz = {
