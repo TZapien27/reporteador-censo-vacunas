@@ -35,21 +35,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
 let DATOS_CACHE = null;
 
-// UBICACIÓN: script.js -> Reemplaza toda la función validarAcceso()
-// UBICACIÓN: script.js -> Reemplaza toda la función validarAcceso()
+// UBICACIÓN: script.js -> En la raíz del archivo (fuera de otras funciones)
 
 async function validarAcceso() {
     try {
-        // 1. Lectura segura (Previene errores si el DOM aún no carga al 100%)
         const inputU = document.getElementById("login-usuario");
         const inputP = document.getElementById("login-password");
         const inputI = document.getElementById("login-institucion");
 
         if (!inputU || !inputP || !inputI) {
-            throw new Error("No se encontraron los campos de login en la interfaz.");
+            throw new Error("No se encuentran los campos de login.");
         }
 
-        // Se aplica toLowerCase() al usuario para evitar rechazos por escribir "Admin" en vez de "admin"
         const u = inputU.value.trim().toLowerCase(); 
         const p = inputP.value.trim();
         const i = inputI.value;
@@ -59,19 +56,16 @@ async function validarAcceso() {
             return;
         }
 
-        // 2. Validación de credenciales
         const valido = USUARIOS_SISTEMA.find(x => x.usr.toLowerCase() === u && x.pass === p && x.inst === i);
         
         if (!valido) {
-            alert(`❌ Acceso denegado. Tus datos no coinciden.\n\nIntentaste con:\nUsuario: ${u}\nInstitución: ${i}`);
-            return; // Detiene la ejecución aquí si no es válido
+            alert("❌ Acceso denegado. Tus datos no coinciden.");
+            return;
         }
 
-        // 3. Transición de UI (Ocultar Login -> Mostrar Dashboard)
         document.getElementById("seccion-login").classList.add("oculto");
         document.getElementById("seccion-dashboard").classList.remove("oculto");
         
-        // 4. Inyección del valor validado al dashboard para reportes
         const inputFiltroInst = document.getElementById("filtro-institucion");
         if (inputFiltroInst) {
             inputFiltroInst.value = valido.inst;
@@ -80,12 +74,11 @@ async function validarAcceso() {
         const btn = document.querySelector(".panel-acciones .btn-principal");
         if (btn) btn.innerText = "Sincronizando Base de Datos... (Puede tomar unos segundos)";
         
-        // 5. Carga y Filtrado en Caché
+        // Petición al servidor (Solo funcionará si usas Live Server / http://)
         DATOS_CACHE = await obtenerDatosDesdeGoogle();
         
-        // Validación de que los datos realmente llegaron
         if (!DATOS_CACHE || !DATOS_CACHE.censo) {
-            throw new Error("El servidor de Google Apps Script no devolvió los datos correctamente. Revisa tu conexión a internet.");
+            throw new Error("El JSON de 'censo' viene vacío. Revisa la red o permisos de Google Apps Script.");
         }
 
         const vacs = new Set(); 
@@ -95,19 +88,15 @@ async function validarAcceso() {
         
         DATOS_CACHE.censo.forEach(row => {
             let instReg = String(buscarDato(row, "registrador_institucion")).toUpperCase();
-            
-            // Escudo lógico de pertenencia institucional
             let perteneceInstitucion = (instUsuario === "TODAS" || instReg.includes(instUsuario) || instUsuario === "");
             
             if (perteneceInstitucion) {
-                // Poblado de Vacunadores y Registradores con fallbacks
                 let v = buscarDato(row, "nombre de vacunador") || buscarDato(row, "vacunador");
                 if (v && String(v).trim() !== "") vacs.add(String(v).trim());
 
                 let r = buscarDato(row, "registrador_nombre") || buscarDato(row, "nombre del registrador") || buscarDato(row, "registrador_institucion"); 
                 if (r && String(r).trim() !== "") regs.add(String(r).trim());
 
-                // Poblado de Casos de Bloqueo Vacunal (Extrae TODOS los casos)
                 let nombreCaso = buscarDato(row, "nombre del caso");
                 if (nombreCaso && String(nombreCaso).trim() !== "") {
                     casosTotales.add(String(nombreCaso).trim());
@@ -115,32 +104,21 @@ async function validarAcceso() {
             }
         });
         
-        // 6. Volcado seguro de datos al DOM
         const sVac = document.getElementById("filtro-vacunador");
         const sReg = document.getElementById("filtro-registrador");
         const sCaso = document.getElementById("filtro-caso"); 
         
-        if (sVac) { 
-            sVac.options.length = 1; 
-            [...vacs].sort().forEach(val => sVac.add(new Option(val, val))); 
-        }
-        if (sReg) { 
-            sReg.options.length = 1; 
-            [...regs].sort().forEach(val => sReg.add(new Option(val, val))); 
-        }
-        if (sCaso) { 
-            sCaso.options.length = 1; 
-            [...casosTotales].sort().forEach(val => sCaso.add(new Option(val, val))); 
-        }
+        if (sVac) { sVac.options.length = 1; [...vacs].sort().forEach(val => sVac.add(new Option(val, val))); }
+        if (sReg) { sReg.options.length = 1; [...regs].sort().forEach(val => sReg.add(new Option(val, val))); }
+        if (sCaso) { sCaso.options.length = 1; [...casosTotales].sort().forEach(val => sCaso.add(new Option(val, val))); }
 
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
 
     } catch (error) {
-        // En caso de que cualquier línea falle, el sistema lo atrapa aquí e informa
-        console.error("Fallo crítico en validación:", error);
+        console.error("Fallo crítico:", error);
         alert(`Fallo en el sistema: ${error.message}`);
         const btn = document.querySelector(".panel-acciones .btn-principal");
-        if (btn) btn.innerText = "Error de Conexión. Recarga la página.";
+        if (btn) btn.innerText = "Error de Conexión.";
     }
 }
 
