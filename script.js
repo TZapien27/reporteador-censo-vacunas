@@ -35,38 +35,41 @@ document.addEventListener("DOMContentLoaded", () => {
 
 let DATOS_CACHE = null;
 
+// UBICACIÓN: script.js -> Reemplaza toda la función validarAcceso()
 async function validarAcceso() {
+    // 1. Lectura segura desde los elementos de Login
     const u = document.getElementById("login-usuario").value.trim();
     const p = document.getElementById("login-password").value.trim();
-    const i = document.getElementById("login-institucion").value;
+    const instSelectorLogin = document.getElementById("login-institucion");
+    const i = instSelectorLogin ? instSelectorLogin.value : "";
 
+    // 2. Validación estricta de credenciales
     const valido = USUARIOS_SISTEMA.find(x => x.usr === u && x.pass === p && x.inst === i);
     if (!valido) return alert("❌ Credenciales inválidas o Institución incorrecta.");
 
+    // 3. Transición de UI (Ocultar Login -> Mostrar Dashboard)
     document.getElementById("seccion-login").classList.add("oculto");
     document.getElementById("seccion-dashboard").classList.remove("oculto");
-    document.getElementById("filtro-institucion").value = valido.inst;
+    
+    // 4. Inyección del valor validado al dashboard para reportes
+    const inputFiltroInst = document.getElementById("filtro-institucion");
+    if (inputFiltroInst) {
+        inputFiltroInst.value = valido.inst;
+    }
 
-    // Precargar BD al iniciar sesión para llenar selectores
-    document.querySelector(".panel-acciones .btn-principal").innerText = "Sincronizando Base de Datos...";
+    const btn = document.querySelector(".panel-acciones .btn-principal");
+    if (btn) btn.innerText = "Sincronizando Base de Datos...";
+    
+    // 5. Carga y Filtrado en Caché
     DATOS_CACHE = await obtenerDatosDesdeGoogle();
     
     if (DATOS_CACHE && DATOS_CACHE.censo) {
         const vacs = new Set(); 
         const regs = new Set();
-        const casosTotales = new Set(); // Renombrado conceptualmente a casosTotales
+        const casosTotales = new Set(); 
         
-        // 1. Extraer la institución desde el selector del LOGIN
-        const instSelectorLogin = document.getElementById("login-institucion");
-        const instUsuario = instSelectorLogin ? instSelectorLogin.value.toUpperCase() : "";
+        const instUsuario = valido.inst.toUpperCase();
         
-        // 2. Sincronizar el dashboard inyectando el valor capturado
-        const inputFiltroInst = document.getElementById("filtro-institucion");
-        if (inputFiltroInst) {
-            inputFiltroInst.value = instUsuario;
-        }
-        
-        // 3. Escaneo y Filtrado Institucional (RBAC)
         DATOS_CACHE.censo.forEach(row => {
             let instReg = String(buscarDato(row, "registrador_institucion")).toUpperCase();
             
@@ -74,24 +77,22 @@ async function validarAcceso() {
             let perteneceInstitucion = (instUsuario === "TODAS" || instReg.includes(instUsuario) || instUsuario === "");
             
             if (perteneceInstitucion) {
-                // Extracción de personal
+                // Poblado de Vacunadores y Registradores con fallbacks
                 let v = buscarDato(row, "nombre de vacunador") || buscarDato(row, "vacunador");
                 if (v && String(v).trim() !== "") vacs.add(String(v).trim());
 
                 let r = buscarDato(row, "registrador_nombre") || buscarDato(row, "nombre del registrador") || buscarDato(row, "registrador_institucion"); 
                 if (r && String(r).trim() !== "") regs.add(String(r).trim());
 
-                // RELAJACIÓN DE REGLA: Extracción de TODOS los casos (sin importar si están cerrados o no)
+                // Poblado de Casos de Bloqueo Vacunal (Extrae TODOS los casos)
                 let nombreCaso = buscarDato(row, "nombre del caso");
-                
-                // Con solo existir el nombre del caso, se inyecta al Set (que se encarga de no duplicarlo)
                 if (nombreCaso && String(nombreCaso).trim() !== "") {
                     casosTotales.add(String(nombreCaso).trim());
                 }
             }
         });
         
-        // 4. Inyección de opciones en los selectores del DOM de forma segura
+        // 6. Volcado seguro de datos al DOM
         const sVac = document.getElementById("filtro-vacunador");
         const sReg = document.getElementById("filtro-registrador");
         const sCaso = document.getElementById("filtro-caso"); 
@@ -105,12 +106,12 @@ async function validarAcceso() {
             [...regs].sort().forEach(val => sReg.add(new Option(val, val))); 
         }
         if (sCaso) { 
-            // Inyecta el listado completo de casos al menú desplegable
             sCaso.options.length = 1; 
             [...casosTotales].sort().forEach(val => sCaso.add(new Option(val, val))); 
         }
     }
-    document.querySelector(".panel-acciones .btn-principal").innerText = "Generar Reporte Seleccionado";
+    
+    if (btn) btn.innerText = "Generar Reporte Seleccionado";
 }
 
 // 1. ESQUEMAS ORIGINALES CENSIA
