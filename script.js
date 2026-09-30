@@ -54,40 +54,39 @@ async function validarAcceso() {
     if (DATOS_CACHE && DATOS_CACHE.censo) {
         const vacs = new Set(); 
         const regs = new Set();
-        const casosCerrados = new Set(); 
+        const casosTotales = new Set(); // Renombrado conceptualmente a casosTotales
         
-        // 1. CORRECCIÓN CRÍTICA: Extraer la institución desde el selector del LOGIN, no del dashboard
+        // 1. Extraer la institución desde el selector del LOGIN
         const instSelectorLogin = document.getElementById("login-institucion");
         const instUsuario = instSelectorLogin ? instSelectorLogin.value.toUpperCase() : "";
         
-        // 2. Sincronizar el dashboard inyectando el valor capturado para que los reportes posteriores lo lean
+        // 2. Sincronizar el dashboard inyectando el valor capturado
         const inputFiltroInst = document.getElementById("filtro-institucion");
         if (inputFiltroInst) {
             inputFiltroInst.value = instUsuario;
         }
         
-        // 3. Escaneo y Filtrado RBAC
+        // 3. Escaneo y Filtrado Institucional (RBAC)
         DATOS_CACHE.censo.forEach(row => {
             let instReg = String(buscarDato(row, "registrador_institucion")).toUpperCase();
             
-            // Escudo lógico: Permite el paso si es administrador (TODAS), si la institución coincide, 
-            // o si el campo quedó vacío por diseño.
+            // Escudo lógico de pertenencia institucional
             let perteneceInstitucion = (instUsuario === "TODAS" || instReg.includes(instUsuario) || instUsuario === "");
             
             if (perteneceInstitucion) {
-                // Poblado de Vacunadores y Registradores autorizados para esta institución
+                // Extracción de personal
                 let v = buscarDato(row, "nombre de vacunador");
                 if (v && String(v).trim() !== "") vacs.add(String(v).trim());
                 
                 let r = buscarDato(row, "registrador_nombre");
                 if (r && String(r).trim() !== "") regs.add(String(r).trim());
 
-                // Detección de Casos de Bloqueo Terminados
-                let esCierre = String(buscarDato(row, "último registro")).toLowerCase().includes("s");
+                // RELAJACIÓN DE REGLA: Extracción de TODOS los casos (sin importar si están cerrados o no)
                 let nombreCaso = buscarDato(row, "nombre del caso");
                 
-                if (esCierre && nombreCaso && String(nombreCaso).trim() !== "") {
-                    casosCerrados.add(String(nombreCaso).trim());
+                // Con solo existir el nombre del caso, se inyecta al Set (que se encarga de no duplicarlo)
+                if (nombreCaso && String(nombreCaso).trim() !== "") {
+                    casosTotales.add(String(nombreCaso).trim());
                 }
             }
         });
@@ -106,11 +105,11 @@ async function validarAcceso() {
             [...regs].sort().forEach(val => sReg.add(new Option(val, val))); 
         }
         if (sCaso) { 
+            // Inyecta el listado completo de casos al menú desplegable
             sCaso.options.length = 1; 
-            [...casosCerrados].sort().forEach(val => sCaso.add(new Option(val, val))); 
+            [...casosTotales].sort().forEach(val => sCaso.add(new Option(val, val))); 
         }
     }
-
     document.querySelector(".panel-acciones .btn-principal").innerText = "Generar Reporte Seleccionado";
 }
 
