@@ -215,8 +215,6 @@ function buscarFechaVacuna(filasVacunas, keyVacuna) {
     return "";
 }
 
-// UBICACIÓN: script.js -> En la función ejecutarGeneracionPorFiltros()
-
 async function ejecutarGeneracionPorFiltros() {
     const btn = document.querySelector(".panel-acciones .btn-principal");
     
@@ -958,24 +956,18 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
 
         if (pines.length === 0) throw new Error("Hay registros, pero ninguno tiene coordenadas GPS válidas.");
 
-        if (btn) btn.innerText = "Descargando Mapa (POST Request)...";
+        if (btn) btn.innerText = "Descargando Mapa (Netlify Edge Proxy)...";
 
-        // UBICACIÓN: script.js -> Dentro de generarMapaDiarioEnPDF()
-
-        if (btn) btn.innerText = "Descargando Mapa (POST Request)...";
-
-        // 3. BYPASS ARQUITECTÓNICO: Netlify Reverse Proxy
+        // 3. BYPASS ARQUITECTÓNICO: Proxy Inverso Nativo de Netlify
         const payloadJSON = {
             size: "800x500",
             format: "png",
             markers: pines
         };
 
-        // Envolvemos la API de QuickChart en un proxy para evadir el bloqueo Preflight (OPTIONS)
-        const targetUrl = 'https://quickchart.io/map';
-        const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
-
-        const response = await fetch(proxyUrl, {
+        // Apuntamos a la ruta local declarada en el archivo _redirects
+        // Esto evita el Preflight OPTIONS y los bloqueos CORS del navegador
+        const response = await fetch('/api/mapa', {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json' 
@@ -984,9 +976,9 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         });
 
         if (!response.ok) {
-            throw new Error(`Fallo en la red o el Proxy rechazó la petición (Error HTTP ${response.status}).`);
+            throw new Error(`Fallo en el enrutamiento de Netlify (Error HTTP ${response.status}). Verifica que el archivo _redirects no tenga extensión .txt`);
         }
-        
+
         // 4. Transformación Binaria a Base64
         const blob = await response.blob();
         const mapaImagenBase64 = await new Promise((resolve, reject) => {
