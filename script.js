@@ -292,8 +292,7 @@ async function ejecutarGeneracionPorFiltros() {
         if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
         else if (tipoRep === "informe") generarInformeActividad(datosUnificados, fInit, fEnd);
         else if (tipoRep === "bloqueo") generarAccionesBloqueo(datosUnificados, fInit, fEnd);
-        else if (tipoRep === "mapa_diario") generarBitacoraDiaria(datosUnificados, fInit);
-        // Restaurar estado del botón si todo fue un éxito
+        else if (tipoRep === "mapa_diario") generarMapaDiarioEnPDF(datosUnificados, fInit);        // Restaurar estado del botón si todo fue un éxito
         btn.innerText = "Generar Reporte Seleccionado";
 
     } catch (error) {
@@ -914,66 +913,115 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     alert("✅ Formato de Bloqueo generado exitosamente.");
 }
 
+// UBICACIÓN: script.js -> Al final del archivo
+
 // ==========================================
-// 7. REPORTE: BITÁCORA DIARIA DE ACCIONES (MAPA EN PDF)
+// 8. REPORTE: MAPA RASTERIZADO EN PDF
 // ==========================================
-function generarBitacoraDiaria(datosUnificados, fecha) {
-    if (datosUnificados.length === 0) {
-        alert("⚠️ No hay acciones registradas para esta fecha.");
+async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
+    if (!fecha) {
+        alert("⚠️ Para generar el mapa, debes seleccionar obligatoriamente una Fecha Inicial exacta.");
         return;
     }
 
-    // 1. Configuración del Documento
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF('l', 'pt', 'letter');
-    const pW = doc.internal.pageSize.width;
+    // 1. Filtrado Vectorial Estricto por Fecha
+    const accionesDelDia = datosUnificados.filter(p => {
+        let fActividad = normalizarFecha(buscarDato(p, "fecha de la actividad"));
+        return fActividad === fecha;
+    });
 
-    // 2. Encabezados
-    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
-    doc.text("BITÁCORA DIARIA DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
-    doc.setFontSize(10); doc.setTextColor(0);
-    doc.text(`FECHA DE LA JORNADA: ${fecha || 'Histórico'}`, pW / 2, 55, { align: 'center' });
+    if (accionesDelDia.length === 0) {
+        alert("⚠️ No hay acciones registradas para la fecha seleccionada.");
+        return;
+    }
 
-    // 3. Procesamiento Vectorial (Transformación de los datos de la app a filas del PDF)
-    const filasTabla = datosUnificados.map((p, index) => {
-        let brigadista = buscarDato(p, "nombre de vacunador");
-        let direccion = `${buscarDato(p, "direccion")} ${buscarDato(p, "colonia")}`;
-        let estatus = buscarDato(p, "domicilio visitado") || "Censado"; 
-        let persona = buscarDato(p, "quien recibe atencion") || "N/A";
+    // 2. Extracción de Coordenadas (Asegúrate que el nombre "ubicacion" o "coordenadas" coincida con tu BD)
+    let pinesParams = "";
+    let conteoValidos = 0;
+
+    accionesDelDia.forEach(p => {
+        // Busca la columna donde guardas "Latitud, Longitud" (Ej: "25.4213, -100.9730")
+        let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
         
-        // Escudo: Contar solo vacunas aplicadas HOY para respetar la regla visual y lógica
-        let vacunasHoy = 0;
-        if (p._historialVacunas) {
-            p._historialVacunas.forEach(v => {
-                let fechaVacuna = buscarDato(v, "fecha_ingresada");
-                if (normalizarFecha(fechaVacuna) === fecha) vacunasHoy++;
-            });
-        }
-
-        return [
-            index + 1,
-            brigadista,
-            direccion,
-            estatus,
-            persona,
-            vacunasHoy > 0 ? `${vacunasHoy} Dosis` : "Ninguna"
-        ];
-    });
-
-    // 4. Renderizado AutoTable
-    doc.autoTable({
-        startY: 70,
-        head: [['No.', 'BRIGADISTA', 'DIRECCIÓN VISITADA', 'ESTATUS / ACCIÓN', 'PERSONA ATENDIDA', 'DOSIS HOY']],
-        body: filasTabla,
-        theme: 'grid',
-        styles: { fontSize: 7, valign: 'middle' },
-        headStyles: { fillColor: [159, 34, 65], textColor: [255, 255, 255], halign: 'center' },
-        columnStyles: {
-            0: { halign: 'center', cellWidth: 30 },
-            3: { halign: 'center', cellWidth: 80 },
-            5: { halign: 'center', cellWidth: 60, fontStyle: 'bold' } // Resalte lógico de dosis del día
+        if (latlong && String(latlong).includes(",")) {
+            // Lógica Condicional de Color (Ej: Rojo si hubo vacunas, Azul si solo fue visita)
+            let huboVacunaHoy = false;
+            if (p._historialVacunas) {
+                p._historialVacunas.forEach(v => {
+                    if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) huboVacunaHoy = true;
+                });
+            }
+            
+            let colorPin = huboVacunaHoy ? "red" : "blue";
+            pinesParams += `&markers=color:${colorPin}%7C${String(latlong).replace(/\s/g, "")}`;
+            conteoValidos++;
         }
     });
 
-    doc.save(`Bitacora_Terreno_${fecha}.pdf`);
+    if (conteoValidos === 0) {
+        alert("⚠️ Hay registros en esta fecha, pero ninguno tiene coordenadas GPS válidas para mapear.");
+        return;
+    }
+
+    // 3. CONSTRUCCIÓN DE LA URL ESTÁTICA (Raterización)
+    // REQUISITO: Reemplaza "TU_GOOGLE_MAPS_API_KEY" por la clave real de tu proyecto en Google Cloud
+    const API_KEY = "TU_GOOGLE_MAPS_API_KEY"; 
+    const mapWidth = 800;
+    const mapHeight = 500;
+    
+    // Si no hay API Key activa, se bloqueará la imagen. La URL se arma dinámicamente:
+    const mapStaticUrl = `https://maps.googleapis.com/maps/api/staticmap?size=${mapWidth}x${mapHeight}&maptype=roadmap${pinesParams}&key=${API_KEY}`;
+
+    // 4. Promesa Asíncrona para descargar la imagen antes de renderizar el PDF
+    const cargarImagenMapa = (url) => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = "Anonymous"; // Crucial para evitar bloqueo CORS al insertar en jsPDF
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error("Error al descargar el mapa. Verifica tu API KEY de Google Maps."));
+            img.src = url;
+        });
+    };
+
+    try {
+        const btn = document.querySelector(".panel-acciones .btn-principal");
+        if (btn) btn.innerText = "Renderizando Mapa...";
+
+        // Espera a que el servidor de Google envíe la fotografía del mapa
+        const mapaImagen = await cargarImagenMapa(mapStaticUrl);
+
+        // 5. INYECCIÓN EN PDF
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF('l', 'pt', 'letter');
+        const pW = doc.internal.pageSize.width;
+
+        doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
+        doc.text("MAPA DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
+        
+        doc.setFontSize(10); doc.setTextColor(0);
+        doc.text(`FECHA DE LA JORNADA: ${fecha}`, pW / 2, 55, { align: 'center' });
+
+        // Dibujar el mapa en el documento
+        // Sintaxis: addImage(imagen, formato, X, Y, Ancho, Alto)
+        doc.addImage(mapaImagen, 'PNG', 40, 80, pW - 80, mapHeight * ((pW - 80) / mapWidth));
+
+        // Leyenda
+        const yLeyenda = 80 + (mapHeight * ((pW - 80) / mapWidth)) + 30;
+        doc.setFontSize(9); doc.setFont(undefined, 'bold');
+        doc.setTextColor(255, 0, 0); doc.text("■ PIN ROJO:", 40, yLeyenda);
+        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Domicilio con aplicación de vacuna.", 100, yLeyenda);
+        
+        doc.setFont(undefined, 'bold'); doc.setTextColor(0, 0, 255); doc.text("■ PIN AZUL:", 300, yLeyenda);
+        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Visita realizada (censado sin vacuna hoy).", 360, yLeyenda);
+
+        doc.save(`Mapa_Acciones_${fecha}.pdf`);
+
+        if (btn) btn.innerText = "Generar Reporte Seleccionado";
+        alert("✅ Mapa PDF generado exitosamente.");
+
+    } catch (error) {
+        alert(error.message);
+        const btn = document.querySelector(".panel-acciones .btn-principal");
+        if (btn) btn.innerText = "Generar Reporte Seleccionado";
+    }
 }
