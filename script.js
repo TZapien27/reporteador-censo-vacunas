@@ -940,11 +940,11 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     let conteoValidos = 0;
 
     accionesDelDia.forEach(p => {
-        // Busca la columna donde guardas "Latitud, Longitud" (Ej: "25.4213, -100.9730")
+        // Busca la columna donde guardas "Latitud, Longitud"
         let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
         
         if (latlong && String(latlong).includes(",")) {
-            // Lógica Condicional de Color (Ej: Rojo si hubo vacunas, Azul si solo fue visita)
+            // Lógica Condicional: Rojo si hubo vacunas aplicadas HOY, Azul si fue solo visita
             let huboVacunaHoy = false;
             if (p._historialVacunas) {
                 p._historialVacunas.forEach(v => {
@@ -953,6 +953,9 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
             }
             
             let colorPin = huboVacunaHoy ? "red" : "blue";
+            
+            // Inyección del parámetro de marcador para QuickChart/OSM
+            // %7C es el código seguro URL para el símbolo separador "|"
             pinesParams += `&markers=color:${colorPin}%7C${String(latlong).replace(/\s/g, "")}`;
             conteoValidos++;
         }
@@ -963,14 +966,12 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         return;
     }
 
-    // 3. CONSTRUCCIÓN DE LA URL ESTÁTICA (Raterización)
-    // REQUISITO: Reemplaza "TU_GOOGLE_MAPS_API_KEY" por la clave real de tu proyecto en Google Cloud
-    const API_KEY = "TU_GOOGLE_MAPS_API_KEY"; 
+    // 3. CONSTRUCCIÓN DE LA URL ESTÁTICA (Motor Open Source - Zero API Key)
     const mapWidth = 800;
     const mapHeight = 500;
     
-    // Si no hay API Key activa, se bloqueará la imagen. La URL se arma dinámicamente:
-    const mapStaticUrl = `https://maps.googleapis.com/maps/api/staticmap?size=${mapWidth}x${mapHeight}&maptype=roadmap${pinesParams}&key=${API_KEY}`;
+    // Migramos a QuickChart (OpenStreetMap). Renderiza mapas estáticos al vuelo sin requerir autenticación.
+    const mapStaticUrl = `https://quickchart.io/map?size=${mapWidth}x${mapHeight}&format=png${pinesParams}`;
 
     // 4. Promesa Asíncrona para descargar la imagen antes de renderizar el PDF
     const cargarImagenMapa = (url) => {
