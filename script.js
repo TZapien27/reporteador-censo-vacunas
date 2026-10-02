@@ -935,17 +935,15 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         return;
     }
 
-    // UBICACIÓN: script.js -> Dentro de generarMapaDiarioEnPDF()
-
-    // 2. Extracción y Compresión Vectorial (Evita el error URI Too Long)
+    // 2. Extracción y Compresión Vectorial Optimizada (Límite de seguridad anti-colapso URI)
     let redMarkers = [];
     let blueMarkers = [];
+    const MAX_PUNTOS_POR_COLOR = 50; // Corta el exceso para prevenir error 404/414 en la API
 
     accionesDelDia.forEach(p => {
         let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
         
         if (latlong && String(latlong).includes(",")) {
-            // Escudo Sanitario: Extrae puramente números, puntos, signos negativos y comas divisorias.
             let limpia = String(latlong).replace(/[^0-9.,-]/g, ""); 
             
             if (limpia.length > 5) {
@@ -956,10 +954,9 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                     });
                 }
                 
-                // Clasificación en arreglos paralelos para comprimir la URL
-                if (huboVacunaHoy) {
+                if (huboVacunaHoy && redMarkers.length < MAX_PUNTOS_POR_COLOR) {
                     redMarkers.push(limpia);
-                } else {
+                } else if (!huboVacunaHoy && blueMarkers.length < MAX_PUNTOS_POR_COLOR) {
                     blueMarkers.push(limpia);
                 }
             }
@@ -971,7 +968,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         return;
     }
 
-    // 3. COMPRESIÓN DE LA URL (Agrupamos todos los puntos por color para no saturar el servidor)
+    // 3. COMPRESIÓN DE LA URL SEGURA
     let pinesParams = "";
     if (redMarkers.length > 0) {
         pinesParams += `&markers=color:red%7C${redMarkers.join('%7C')}`;
