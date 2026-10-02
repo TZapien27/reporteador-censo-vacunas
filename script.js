@@ -965,14 +965,17 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         if (btn) btn.innerText = "Descargando Mapa (POST Request)...";
 
         // 3. BYPASS ARQUITECTÓNICO: Netlify Reverse Proxy
-        // La URL apunta a nuestro propio dominio (ruta relativa). Netlify la despachará hacia QuickChart por backend.
         const payloadJSON = {
             size: "800x500",
             format: "png",
             markers: pines
         };
 
-        const response = await fetch('/api/mapa', {
+        // Envolvemos la API de QuickChart en un proxy para evadir el bloqueo Preflight (OPTIONS)
+        const targetUrl = 'https://quickchart.io/map';
+        const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(targetUrl);
+
+        const response = await fetch(proxyUrl, {
             method: 'POST',
             headers: { 
                 'Content-Type': 'application/json' 
@@ -981,7 +984,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         });
 
         if (!response.ok) {
-            throw new Error(`El proxy de Netlify o el servidor de mapas rechazó la petición (Error HTTP ${response.status}).`);
+            throw new Error(`Fallo en la red o el Proxy rechazó la petición (Error HTTP ${response.status}).`);
         }
         
         // 4. Transformación Binaria a Base64
