@@ -912,7 +912,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 }
 
 // ==========================================
-// 8. REPORTE: MAPA RASTERIZADO EN PDF (Vía POST Payload)
+// 8. REPORTE: MAPA RASTERIZADO EN PDF (Vía Proxy GET Comprimido)
 // ==========================================
 async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     if (!fecha) {
@@ -921,25 +921,28 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     }
 
     const btn = document.querySelector(".panel-acciones .btn-principal");
-    if (btn) btn.innerText = "Compilando Vectores Geoespaciales...";
+    if (btn) btn.innerText = "Procesando Vectores Geoespaciales...";
 
     try {
-        // 1. Filtrado Vectorial Estricto por Fecha
+        // 1. Filtrado Vectorial Estricto
         const accionesDelDia = datosUnificados.filter(p => normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha);
-
         if (accionesDelDia.length === 0) throw new Error("No hay acciones registradas para la fecha seleccionada.");
 
-        // 2. Extracción Vectorial y Asignación de Color
-        let pines = [];
-        
+        let redMarkers = [];
+        let blueMarkers = [];
+
+        // 2. Extracción y Compresión Geométrica (Evita el colapso de la URL)
         accionesDelDia.forEach(p => {
             let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
             
             if (latlong && String(latlong).includes(",")) {
-                // Limpieza estricta de coordenadas
-                let limpia = String(latlong).replace(/[^0-9.,-]/g, ""); 
-                
-                if (limpia.length > 5) {
+                let partes = String(latlong).split(",");
+                if (partes.length === 2) {
+                    // Redondeo a 4 decimales: Precisión de ~11 metros, ahorra un 40% de caracteres en la URL
+                    let lat = parseFloat(partes[0].replace(/[^0-9.-]/g, "")).toFixed(4);
+                    let lng = parseFloat(partes[1].replace(/[^0-9.-]/g, "")).toFixed(4);
+                    let limpia = `${lat},${lng}`;
+                    
                     let huboVacunaHoy = false;
                     if (p._historialVacunas) {
                         p._historialVacunas.forEach(v => {
@@ -947,86 +950,72 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                         });
                     }
                     
-                    // Formato requerido por QuickChart en payload POST: "color:red|lat,lng"
-                    let color = huboVacunaHoy ? "red" : "blue";
-                    pines.push(`color:${color}|${limpia}`);
+                    if (huboVacunaHoy) redMarkers.push(limpia);
+                    else blueMarkers.push(limpia);
                 }
             }
         });
 
-        if (pines.length === 0) throw new Error("Hay registros, pero ninguno tiene coordenadas GPS válidas.");
+        if (redMarkers.length === 0 && blueMarkers.length === 0) throw new Error("Hay registros, pero sin coordenadas GPS válidas.");
+
+        // 3. CONSTRUCCIÓN DE PARÁMETROS COMPRIMIDOS
+        let pinesParams = "";
+        if (redMarkers.length > 0) pinesParams += `&markers=color:red%7C${redMarkers.join('%7C')}`;
+        if (blueMarkers.length > 0) pinesParams += `&markers=color:blue%7C${blueMarkers.join('%7C')}`;
 
         if (btn) btn.innerText = "Descargando Mapa (Netlify Edge Proxy)...";
 
-        // 3. BYPASS ARQUITECTÓNICO: Proxy Inverso Nativo de Netlify
-        const payloadJSON = {
-            size: "800x500",
-            format: "png",
-            markers: pines
-        };
-
-        // Apuntamos a la ruta local declarada en el archivo _redirects
-        // Esto evita el Preflight OPTIONS y los bloqueos CORS del navegador
-        const response = await fetch('/api/mapa', {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify(payloadJSON)
-        });
+        // 4. PETICIÓN GET AL PROXY DE NETLIFY
+        // Al usar GET, QuickChart reconoce la ruta. Netlify intercepta la llamada y evade el bloqueo CORS.
+        const urlProxy = `/api/mapa?size=800x500&format=png${pinesParams}`;
+        
+        const response = await fetch(urlProxy, { method: 'GET' });
 
         if (!response.ok) {
-            throw new Error(`Fallo en el enrutamiento de Netlify (Error HTTP ${response.status}). Verifica que el archivo _redirects no tenga extensión .txt`);
+            throw new Error(`Fallo en la comunicación con el servidor de mapas (Error ${response.status}).`);
         }
 
-        // 4. Transformación Binaria a Base64
+        // 5. CONVERSIÓN A BASE64 PARA INYECCIÓN SEGURA EN PDF
         const blob = await response.blob();
         const mapaImagenBase64 = await new Promise((resolve, reject) => {
             const reader = new FileReader();
             reader.onloadend = () => resolve(reader.result);
-            reader.onerror = () => reject(new Error("Fallo en la conversión del Blob a Base64."));
+            reader.onerror = () => reject(new Error("Fallo al decodificar la imagen del mapa."));
             reader.readAsDataURL(blob);
         });
 
         if (btn) btn.innerText = "Renderizando PDF...";
 
-        // 5. INYECCIÓN EN EL LIENZO PDF (jsPDF)
+        // 6. INYECCIÓN EN jsPDF
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('l', 'pt', 'letter');
         const pW = doc.internal.pageSize.width;
-        
-        const mapWidth = 800;
-        const mapHeight = 500;
+        const mapWidth = 800; const mapHeight = 500;
 
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
         doc.text("MAPA DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
         
         doc.setFontSize(10); doc.setTextColor(0);
-        doc.text(`FECHA DE LA JORNADA: ${fecha}`, pW / 2, 55, { align: 'center' });
+        doc.text(`FECHA DE LA JORNADA: ${fecha} | Pines Totales: ${redMarkers.length + blueMarkers.length}`, pW / 2, 55, { align: 'center' });
 
-        // Cálculos de proporción para que el mapa ocupe todo el ancho disponible
         let anchoRender = pW - 80;
         let altoRender = mapHeight * (anchoRender / mapWidth);
-        
         doc.addImage(mapaImagenBase64, 'PNG', 40, 80, anchoRender, altoRender);
 
-        // Leyenda
         const yLeyenda = 80 + altoRender + 30;
         doc.setFontSize(9); doc.setFont(undefined, 'bold');
+        doc.setTextColor(255, 0, 0); doc.text(`■ PIN ROJO (${redMarkers.length}):`, 40, yLeyenda);
+        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Domicilio con aplicación de vacuna.", 115, yLeyenda);
         
-        doc.setTextColor(255, 0, 0); doc.text("■ PIN ROJO:", 40, yLeyenda);
-        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Domicilio con aplicación de vacuna.", 100, yLeyenda);
-        
-        doc.setFont(undefined, 'bold'); doc.setTextColor(0, 0, 255); doc.text("■ PIN AZUL:", 300, yLeyenda);
-        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Visita realizada (censado sin vacuna hoy).", 360, yLeyenda);
+        doc.setFont(undefined, 'bold'); doc.setTextColor(0, 0, 255); doc.text(`■ PIN AZUL (${blueMarkers.length}):`, 320, yLeyenda);
+        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Visita realizada (censado sin vacuna hoy).", 395, yLeyenda);
 
-        // Guardado
         doc.save(`Mapa_Acciones_${fecha}.pdf`);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
         alert("✅ Mapa PDF generado exitosamente.");
 
     } catch (error) {
-        console.error("Fallo Arquitectónico en el Motor del Mapa:", error);
+        console.error("Error Geográfico:", error);
         alert(error.message);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
     }
