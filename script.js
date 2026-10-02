@@ -292,7 +292,7 @@ async function ejecutarGeneracionPorFiltros() {
         if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
         else if (tipoRep === "informe") generarInformeActividad(datosUnificados, fInit, fEnd);
         else if (tipoRep === "bloqueo") generarAccionesBloqueo(datosUnificados, fInit, fEnd);
-
+        else if (tipoRep === "mapa_diario") generarBitacoraDiaria(datosUnificados, fInit);
         // Restaurar estado del botón si todo fue un éxito
         btn.innerText = "Generar Reporte Seleccionado";
 
@@ -912,4 +912,68 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
     let fName = (fInit && fEnd && fInit !== fEnd) ? `${fInit}_${fEnd}` : (fInit ? fInit : "Historico");
     doc.save(`Bloqueo_Vacunal_${fName}.pdf`);
     alert("✅ Formato de Bloqueo generado exitosamente.");
+}
+
+// ==========================================
+// 7. REPORTE: BITÁCORA DIARIA DE ACCIONES (MAPA EN PDF)
+// ==========================================
+function generarBitacoraDiaria(datosUnificados, fecha) {
+    if (datosUnificados.length === 0) {
+        alert("⚠️ No hay acciones registradas para esta fecha.");
+        return;
+    }
+
+    // 1. Configuración del Documento
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('l', 'pt', 'letter');
+    const pW = doc.internal.pageSize.width;
+
+    // 2. Encabezados
+    doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
+    doc.text("BITÁCORA DIARIA DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
+    doc.setFontSize(10); doc.setTextColor(0);
+    doc.text(`FECHA DE LA JORNADA: ${fecha || 'Histórico'}`, pW / 2, 55, { align: 'center' });
+
+    // 3. Procesamiento Vectorial (Transformación de los datos de la app a filas del PDF)
+    const filasTabla = datosUnificados.map((p, index) => {
+        let brigadista = buscarDato(p, "nombre de vacunador");
+        let direccion = `${buscarDato(p, "direccion")} ${buscarDato(p, "colonia")}`;
+        let estatus = buscarDato(p, "domicilio visitado") || "Censado"; 
+        let persona = buscarDato(p, "quien recibe atencion") || "N/A";
+        
+        // Escudo: Contar solo vacunas aplicadas HOY para respetar la regla visual y lógica
+        let vacunasHoy = 0;
+        if (p._historialVacunas) {
+            p._historialVacunas.forEach(v => {
+                let fechaVacuna = buscarDato(v, "fecha_ingresada");
+                if (normalizarFecha(fechaVacuna) === fecha) vacunasHoy++;
+            });
+        }
+
+        return [
+            index + 1,
+            brigadista,
+            direccion,
+            estatus,
+            persona,
+            vacunasHoy > 0 ? `${vacunasHoy} Dosis` : "Ninguna"
+        ];
+    });
+
+    // 4. Renderizado AutoTable
+    doc.autoTable({
+        startY: 70,
+        head: [['No.', 'BRIGADISTA', 'DIRECCIÓN VISITADA', 'ESTATUS / ACCIÓN', 'PERSONA ATENDIDA', 'DOSIS HOY']],
+        body: filasTabla,
+        theme: 'grid',
+        styles: { fontSize: 7, valign: 'middle' },
+        headStyles: { fillColor: [159, 34, 65], textColor: [255, 255, 255], halign: 'center' },
+        columnStyles: {
+            0: { halign: 'center', cellWidth: 30 },
+            3: { halign: 'center', cellWidth: 80 },
+            5: { halign: 'center', cellWidth: 60, fontStyle: 'bold' } // Resalte lógico de dosis del día
+        }
+    });
+
+    doc.save(`Bitacora_Terreno_${fecha}.pdf`);
 }
