@@ -973,26 +973,38 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     // Migramos a QuickChart (OpenStreetMap). Renderiza mapas estáticos al vuelo sin requerir autenticación.
     const mapStaticUrl = `https://quickchart.io/map?size=${mapWidth}x${mapHeight}&format=png${pinesParams}`;
 
-    // 4. Promesa Asíncrona Robusta (Fetch + Conversión a Base64)
-    // Esto puentea las restricciones CORS de Canvas Tainting, ideal para entornos locales (file:///)
-    const cargarImagenMapa = async (url) => {
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP Error: ${response.status}`);
-            }
-            const blob = await response.blob();
+    // 4. Promesa Asíncrona Robusta (Bypass de Fetch usando HTML5 Canvas)
+    const cargarImagenMapa = (url) => {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
             
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                // Cuando termina de leer el Blob, devuelve una cadena Base64 pura
-                reader.onloadend = () => resolve(reader.result);
-                reader.onerror = () => reject(new Error("Fallo en la conversión del mapa a formato Base64."));
-                reader.readAsDataURL(blob);
-            });
-        } catch (error) {
-            throw new Error(`Fallo de red al intentar descargar el mapa de QuickChart. Asegúrate de estar conectado a internet. Detalles: ${error.message}`);
-        }
+            // Atributo crucial para que QuickChart autorice la lectura de los píxeles
+            img.crossOrigin = "Anonymous"; 
+            
+            img.onload = () => {
+                try {
+                    // Creamos un lienzo invisible del mismo tamaño que la imagen
+                    const canvas = document.createElement("canvas");
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext("2d");
+                    
+                    // Dibujamos la imagen descargada en el lienzo
+                    ctx.drawImage(img, 0, 0);
+                    
+                    // Extraemos la imagen como texto Base64
+                    const base64String = canvas.toDataURL("image/png");
+                    resolve(base64String);
+                } catch (e) {
+                    reject(new Error("El navegador bloqueó la lectura del mapa (Canvas Tainting)."));
+                }
+            };
+            
+            img.onerror = () => reject(new Error("El motor del navegador abortó la descarga de la imagen desde QuickChart."));
+            
+            // Iniciar la descarga de la imagen
+            img.src = url;
+        });
     };
 
     try {
