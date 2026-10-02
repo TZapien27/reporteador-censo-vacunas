@@ -960,22 +960,30 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
 
         if (btn) btn.innerText = "Descargando Mapa (POST Request)...";
 
-        // 3. BYPASS ARQUITECTÓNICO: Petición POST a QuickChart
-        // Esto evita el límite de caracteres de la URL (URI Too Long)
+        // UBICACIÓN: script.js -> Dentro de generarMapaDiarioEnPDF()
+
+        if (btn) btn.innerText = "Descargando Mapa (POST Request)...";
+
+        // 3. BYPASS ARQUITECTÓNICO: Netlify Reverse Proxy
+        // La URL apunta a nuestro propio dominio (ruta relativa). Netlify la despachará hacia QuickChart por backend.
         const payloadJSON = {
             size: "800x500",
             format: "png",
             markers: pines
         };
 
-        const response = await fetch('https://quickchart.io/map', {
+        const response = await fetch('/api/mapa', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json' 
+            },
             body: JSON.stringify(payloadJSON)
         });
 
-        if (!response.ok) throw new Error(`El servidor de mapas rechazó la petición (Error ${response.status}).`);
-
+        if (!response.ok) {
+            throw new Error(`El proxy de Netlify o el servidor de mapas rechazó la petición (Error HTTP ${response.status}).`);
+        }
+        
         // 4. Transformación Binaria a Base64
         const blob = await response.blob();
         const mapaImagenBase64 = await new Promise((resolve, reject) => {
