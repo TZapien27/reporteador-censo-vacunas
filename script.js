@@ -973,23 +973,34 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     // Migramos a QuickChart (OpenStreetMap). Renderiza mapas estáticos al vuelo sin requerir autenticación.
     const mapStaticUrl = `https://quickchart.io/map?size=${mapWidth}x${mapHeight}&format=png${pinesParams}`;
 
-    // 4. Promesa Asíncrona para descargar la imagen antes de renderizar el PDF
-    const cargarImagenMapa = (url) => {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = "Anonymous"; // Crucial para evitar bloqueo CORS al insertar en jsPDF
-            img.onload = () => resolve(img);
-            img.onerror = () => reject(new Error("Error al descargar el mapa. Verifica tu API KEY de Google Maps."));
-            img.src = url;
-        });
+    // 4. Promesa Asíncrona Robusta (Fetch + Conversión a Base64)
+    // Esto puentea las restricciones CORS de Canvas Tainting, ideal para entornos locales (file:///)
+    const cargarImagenMapa = async (url) => {
+        try {
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`HTTP Error: ${response.status}`);
+            }
+            const blob = await response.blob();
+            
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                // Cuando termina de leer el Blob, devuelve una cadena Base64 pura
+                reader.onloadend = () => resolve(reader.result);
+                reader.onerror = () => reject(new Error("Fallo en la conversión del mapa a formato Base64."));
+                reader.readAsDataURL(blob);
+            });
+        } catch (error) {
+            throw new Error(`Fallo de red al intentar descargar el mapa de QuickChart. Asegúrate de estar conectado a internet. Detalles: ${error.message}`);
+        }
     };
 
     try {
         const btn = document.querySelector(".panel-acciones .btn-principal");
-        if (btn) btn.innerText = "Renderizando Mapa...";
+        if (btn) btn.innerText = "Renderizando Mapa (Descargando vectores)...";
 
-        // Espera a que el servidor de Google envíe la fotografía del mapa
-        const mapaImagen = await cargarImagenMapa(mapStaticUrl);
+        // Espera a que la promesa resuelva el mapa en Base64
+        const mapaImagenBase64 = await cargarImagenMapa(mapStaticUrl);
 
         // 5. INYECCIÓN EN PDF
         const { jsPDF } = window.jspdf;
@@ -1004,7 +1015,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
 
         // Dibujar el mapa en el documento
         // Sintaxis: addImage(imagen, formato, X, Y, Ancho, Alto)
-        doc.addImage(mapaImagen, 'PNG', 40, 80, pW - 80, mapHeight * ((pW - 80) / mapWidth));
+        doc.addImage(mapaImagenBase64, 'PNG', 40, 80, pW - 80, mapHeight * ((pW - 80) / mapWidth));
 
         // Leyenda
         const yLeyenda = 80 + (mapHeight * ((pW - 80) / mapWidth)) + 30;
