@@ -935,78 +935,83 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         return;
     }
 
-    // 2. Extracción de Coordenadas (Asegúrate que el nombre "ubicacion" o "coordenadas" coincida con tu BD)
-    let pinesParams = "";
-    let conteoValidos = 0;
+    // UBICACIÓN: script.js -> Dentro de generarMapaDiarioEnPDF()
+
+    // 2. Extracción y Compresión Vectorial (Evita el error URI Too Long)
+    let redMarkers = [];
+    let blueMarkers = [];
 
     accionesDelDia.forEach(p => {
-        // Busca la columna donde guardas "Latitud, Longitud"
         let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
         
         if (latlong && String(latlong).includes(",")) {
-            // Lógica Condicional: Rojo si hubo vacunas aplicadas HOY, Azul si fue solo visita
-            let huboVacunaHoy = false;
-            if (p._historialVacunas) {
-                p._historialVacunas.forEach(v => {
-                    if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) huboVacunaHoy = true;
-                });
+            // Escudo Sanitario: Extrae puramente números, puntos, signos negativos y comas divisorias.
+            let limpia = String(latlong).replace(/[^0-9.,-]/g, ""); 
+            
+            if (limpia.length > 5) {
+                let huboVacunaHoy = false;
+                if (p._historialVacunas) {
+                    p._historialVacunas.forEach(v => {
+                        if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) huboVacunaHoy = true;
+                    });
+                }
+                
+                // Clasificación en arreglos paralelos para comprimir la URL
+                if (huboVacunaHoy) {
+                    redMarkers.push(limpia);
+                } else {
+                    blueMarkers.push(limpia);
+                }
             }
-            
-            let colorPin = huboVacunaHoy ? "red" : "blue";
-            
-            // Inyección del parámetro de marcador para QuickChart/OSM
-            // %7C es el código seguro URL para el símbolo separador "|"
-            pinesParams += `&markers=color:${colorPin}%7C${String(latlong).replace(/\s/g, "")}`;
-            conteoValidos++;
         }
     });
 
-    if (conteoValidos === 0) {
-        alert("⚠️ Hay registros en esta fecha, pero ninguno tiene coordenadas GPS válidas para mapear.");
+    if (redMarkers.length === 0 && blueMarkers.length === 0) {
+        alert("⚠️ Hay registros, pero ninguno tiene coordenadas GPS válidas para ubicar en el mapa.");
         return;
     }
 
-    // 3. CONSTRUCCIÓN DE LA URL ESTÁTICA (Motor Open Source - Zero API Key)
+    // 3. COMPRESIÓN DE LA URL (Agrupamos todos los puntos por color para no saturar el servidor)
+    let pinesParams = "";
+    if (redMarkers.length > 0) {
+        pinesParams += `&markers=color:red%7C${redMarkers.join('%7C')}`;
+    }
+    if (blueMarkers.length > 0) {
+        pinesParams += `&markers=color:blue%7C${blueMarkers.join('%7C')}`;
+    }
+
     const mapWidth = 800;
     const mapHeight = 500;
-    
-    // Migramos a QuickChart (OpenStreetMap). Renderiza mapas estáticos al vuelo sin requerir autenticación.
     const mapStaticUrl = `https://quickchart.io/map?size=${mapWidth}x${mapHeight}&format=png${pinesParams}`;
 
-    // 4. Promesa Asíncrona Robusta (Bypass de Fetch usando HTML5 Canvas)
+    // 4. Promesa Asíncrona Blindada con Rastreo de Consola
     const cargarImagenMapa = (url) => {
         return new Promise((resolve, reject) => {
             const img = new Image();
-            
-            // Atributo crucial para que QuickChart autorice la lectura de los píxeles
             img.crossOrigin = "Anonymous"; 
             
             img.onload = () => {
                 try {
-                    // Creamos un lienzo invisible del mismo tamaño que la imagen
                     const canvas = document.createElement("canvas");
                     canvas.width = img.width;
                     canvas.height = img.height;
                     const ctx = canvas.getContext("2d");
-                    
-                    // Dibujamos la imagen descargada en el lienzo
                     ctx.drawImage(img, 0, 0);
-                    
-                    // Extraemos la imagen como texto Base64
-                    const base64String = canvas.toDataURL("image/png");
-                    resolve(base64String);
+                    resolve(canvas.toDataURL("image/png"));
                 } catch (e) {
-                    reject(new Error("El navegador bloqueó la lectura del mapa (Canvas Tainting)."));
+                    reject(new Error("CORS bloqueó la extracción del lienzo. Abre el sistema usando Live Server."));
                 }
             };
             
-            img.onerror = () => reject(new Error("El motor del navegador abortó la descarga de la imagen desde QuickChart."));
+            img.onerror = () => {
+                // Inyección forense: si vuelve a fallar, la URL exacta quedará impresa en tu consola (F12) para auditarla.
+                console.error("🚨 URL RECHAZADA POR EL SERVIDOR (Verifica longitud o formato):", url);
+                reject(new Error("QuickChart rechazó la petición del mapa. Revisa la consola (F12) para analizar la URL generada."));
+            };
             
-            // Iniciar la descarga de la imagen
             img.src = url;
         });
     };
-
     try {
         const btn = document.querySelector(".panel-acciones .btn-principal");
         if (btn) btn.innerText = "Renderizando Mapa (Descargando vectores)...";
