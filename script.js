@@ -914,90 +914,117 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 }
 
 // ==========================================
-// 8. REPORTE: BITÁCORA Y COORDENADAS DE ACCIONES EN TERRENO
+// 8. REPORTE: MAPA RASTERIZADO EN PDF (Vía POST Payload)
 // ==========================================
 async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     if (!fecha) {
-        alert("⚠️ Para generar este reporte, debes seleccionar obligatoriamente una Fecha Inicial exacta.");
+        alert("⚠️ Para generar el mapa, debes seleccionar obligatoriamente una Fecha Inicial exacta.");
         return;
     }
 
-    // 1. Filtrado Vectorial Estricto por Fecha
-    const accionesDelDia = datosUnificados.filter(p => {
-        let fActividad = normalizarFecha(buscarDato(p, "fecha de la actividad"));
-        return fActividad === fecha;
-    });
-
-    if (accionesDelDia.length === 0) {
-        alert("⚠️ No hay acciones registradas para la fecha seleccionada.");
-        return;
-    }
+    const btn = document.querySelector(".panel-acciones .btn-principal");
+    if (btn) btn.innerText = "Compilando Vectores Geoespaciales...";
 
     try {
-        const btn = document.querySelector(".panel-acciones .btn-principal");
-        if (btn) btn.innerText = "Generando Reporte de Acciones...";
+        // 1. Filtrado Vectorial Estricto por Fecha
+        const accionesDelDia = datosUnificados.filter(p => normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha);
 
-        // 2. INYECCIÓN EN PDF (Estructura Tabular Vectorial Optimizada)
+        if (accionesDelDia.length === 0) throw new Error("No hay acciones registradas para la fecha seleccionada.");
+
+        // 2. Extracción Vectorial y Asignación de Color
+        let pines = [];
+        
+        accionesDelDia.forEach(p => {
+            let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
+            
+            if (latlong && String(latlong).includes(",")) {
+                // Limpieza estricta de coordenadas
+                let limpia = String(latlong).replace(/[^0-9.,-]/g, ""); 
+                
+                if (limpia.length > 5) {
+                    let huboVacunaHoy = false;
+                    if (p._historialVacunas) {
+                        p._historialVacunas.forEach(v => {
+                            if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) huboVacunaHoy = true;
+                        });
+                    }
+                    
+                    // Formato requerido por QuickChart en payload POST: "color:red|lat,lng"
+                    let color = huboVacunaHoy ? "red" : "blue";
+                    pines.push(`color:${color}|${limpia}`);
+                }
+            }
+        });
+
+        if (pines.length === 0) throw new Error("Hay registros, pero ninguno tiene coordenadas GPS válidas.");
+
+        if (btn) btn.innerText = "Descargando Mapa (POST Request)...";
+
+        // 3. BYPASS ARQUITECTÓNICO: Petición POST a QuickChart
+        // Esto evita el límite de caracteres de la URL (URI Too Long)
+        const payloadJSON = {
+            size: "800x500",
+            format: "png",
+            markers: pines
+        };
+
+        const response = await fetch('https://quickchart.io/map', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payloadJSON)
+        });
+
+        if (!response.ok) throw new Error(`El servidor de mapas rechazó la petición (Error ${response.status}).`);
+
+        // 4. Transformación Binaria a Base64
+        const blob = await response.blob();
+        const mapaImagenBase64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = () => reject(new Error("Fallo en la conversión del Blob a Base64."));
+            reader.readAsDataURL(blob);
+        });
+
+        if (btn) btn.innerText = "Renderizando PDF...";
+
+        // 5. INYECCIÓN EN EL LIENZO PDF (jsPDF)
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('l', 'pt', 'letter');
         const pW = doc.internal.pageSize.width;
+        
+        const mapWidth = 800;
+        const mapHeight = 500;
 
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
-        doc.text("REPORTE DE ACCIONES Y UBICACIONES EN TERRENO", pW / 2, 40, { align: 'center' });
+        doc.text("MAPA DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
         
         doc.setFontSize(10); doc.setTextColor(0);
-        doc.text(`FECHA DE LA JORNADA: ${fecha} | Total de Registros: ${accionesDelDia.length}`, pW / 2, 55, { align: 'center' });
+        doc.text(`FECHA DE LA JORNADA: ${fecha}`, pW / 2, 55, { align: 'center' });
 
-        // Mapeo de filas para la tabla de ubicaciones
-        const filasTabla = accionesDelDia.map((p, index) => {
-            let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas") || "Sin Coordenadas";
-            let direccion = `${buscarDato(p, "direccion") || ""} ${buscarDato(p, "colonia") || ""}`.trim();
-            let estatus = buscarDato(p, "domicilio visitado") || "Censado";
-            let persona = buscarDato(p, "quien recibe atencion") || buscarDato(p, "nombre del paciente") || "N/A";
-            let vacunador = buscarDato(p, "nombre de vacunador") || "N/A";
+        // Cálculos de proporción para que el mapa ocupe todo el ancho disponible
+        let anchoRender = pW - 80;
+        let altoRender = mapHeight * (anchoRender / mapWidth);
+        
+        doc.addImage(mapaImagenBase64, 'PNG', 40, 80, anchoRender, altoRender);
 
-            let huboVacunaHoy = false;
-            if (p._historialVacunas) {
-                p._historialVacunas.forEach(v => {
-                    if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) huboVacunaHoy = true;
-                });
-            }
+        // Leyenda
+        const yLeyenda = 80 + altoRender + 30;
+        doc.setFontSize(9); doc.setFont(undefined, 'bold');
+        
+        doc.setTextColor(255, 0, 0); doc.text("■ PIN ROJO:", 40, yLeyenda);
+        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Domicilio con aplicación de vacuna.", 100, yLeyenda);
+        
+        doc.setFont(undefined, 'bold'); doc.setTextColor(0, 0, 255); doc.text("■ PIN AZUL:", 300, yLeyenda);
+        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Visita realizada (censado sin vacuna hoy).", 360, yLeyenda);
 
-            return [
-                index + 1,
-                estatus,
-                direccion !== "" ? direccion : "Domicilio sin especificar",
-                latlong,
-                persona,
-                vacunador,
-                huboVacunaHoy ? "APLICADA HOY" : "SIN DOSIS HOY"
-            ];
-        });
-
-        doc.autoTable({
-            startY: 75,
-            head: [['No.', 'ESTATUS DOMICILIO', 'DIRECCIÓN Y COLONIA', 'COORDENADAS GPS', 'PERSONA ATENDIDA', 'VACUNADOR', 'DOSIS']],
-            body: filasTabla,
-            theme: 'grid',
-            styles: { fontSize: 6.5, valign: 'middle' },
-            headStyles: { fillColor: [159, 34, 65], textColor: [255, 255, 255], halign: 'center' },
-            columnStyles: {
-                0: { halign: 'center', cellWidth: 25 },
-                1: { halign: 'center', cellWidth: 70 },
-                3: { halign: 'center', cellWidth: 90 },
-                6: { halign: 'center', cellWidth: 65, fontStyle: 'bold' }
-            }
-        });
-
-        doc.save(`Acciones_Terreno_${fecha}.pdf`);
-
+        // Guardado
+        doc.save(`Mapa_Acciones_${fecha}.pdf`);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
-        alert("✅ Reporte de acciones generado exitosamente.");
+        alert("✅ Mapa PDF generado exitosamente.");
 
     } catch (error) {
-        console.error("Fallo al generar el reporte:", error);
-        alert("Ocurrió un error al procesar el reporte de acciones.");
-        const btn = document.querySelector(".panel-acciones .btn-principal");
+        console.error("Fallo Arquitectónico en el Motor del Mapa:", error);
+        alert(error.message);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
     }
 }
