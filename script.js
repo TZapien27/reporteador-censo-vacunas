@@ -912,7 +912,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 }
 
 // ==========================================
-// 8. REPORTE: MAPA GEOESPACIAL CON CAPA BASE Y SIMBOLOGÍA
+// 8. REPORTE: MAPA GEOESPACIAL LOCAL (ESRI + SIMBOLOGÍA EXACTA)
 // ==========================================
 
 // Motor Matemático Web Mercator (Convierte GPS a Pixeles de pantalla)
@@ -926,21 +926,21 @@ function latLngToPx(lat, lng, zoom) {
 async function cargarTileOSM(url) {
     return new Promise((resolve) => {
         const img = new Image();
-        img.crossOrigin = "Anonymous"; // Petición limpia para Canvas
+        img.crossOrigin = "Anonymous"; // Petición limpia para habilitar exportación a PDF
         img.onload = () => resolve(img);
-        img.onerror = () => resolve(null); // Si falla el internet, devuelve null pero no rompe el reporte
+        img.onerror = () => resolve(null); // Fallback silencioso sin romper el reporte
         img.src = url;
     });
 }
 
 async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     if (!fecha) {
-        alert("⚠️ Selecciona una Fecha Inicial exacta para el mapa.");
+        alert("⚠️️ Selecciona una Fecha Inicial exacta para el mapa.");
         return;
     }
 
     const btn = document.querySelector(".panel-acciones .btn-principal");
-    if (btn) btn.innerText = "Descargando Cartografía Base...";
+    if (btn) btn.innerText = "Descargando Cartografía Base (Esri)...";
 
     try {
         const accionesDelDia = datosUnificados.filter(p => normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha);
@@ -953,8 +953,10 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         // DICCIONARIO DE SIMBOLOGÍA (Reglas de Negocio)
         // ==========================================
         const evaluarSimbologia = (registro) => {
-            // Aplicamos .trim() para limpiar espacios ocultos. Si la celda está vacía, será ""
-            let est = String(buscarDato(registro, "estatus_vivienda") || "").toLowerCase().trim();
+            // EXTRACCIÓN EXACTA: Llave de la columna "situación familiar"
+            // Se prevén variaciones de acentos para garantizar la conexión con el JSON
+            let valorBruto = buscarDato(registro, "situación familiar") || buscarDato(registro, "situacion familiar") || "";
+            let est = String(valorBruto).toLowerCase().trim();
             
             let huboVacuna = false;
             if (registro._historialVacunas) {
@@ -966,29 +968,30 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
             // 1. Prioridad Absoluta: Vacuna aplicada hoy (VERDE, pin grande)
             if (huboVacuna) return { label: "Vacuna Aplicada", color: "#008000", radius: 7 }; 
             
-            // 2. Control de Nulos/Vacíos y Agrupación de Baldíos
+            // 2. Control de Nulos/Vacíos y Agrupación (Atrapa exactamente los registros vacíos o deshabitados)
             if (est === "" || est.includes("deshabitada") || est.includes("baldío") || est.includes("baldio")) {
                 return { label: "Deshabitadas / Baldíos", color: "#9E9E9E", radius: 5 }; // Gris
             }
 
-            // 3. Resto de la lógica de visitas
-            if (est.includes("ausente")) return { label: "Fam. Ausente", color: "#FF8C00", radius: 5 }; // Naranja
-            if (est.includes("renuente")) return { label: "Fam. Renuente", color: "#8B0000", radius: 5 }; // Rojo Oscuro
-            if (est.includes("negocio")) return { label: "Negocio", color: "#800080", radius: 5 }; // Morado
+            // 3. Procesamiento de los registros restantes con datos válidos
+            if (est.includes("ausente")) return { label: "Fam. Ausente", color: "#FF8C00", radius: 5 }; 
+            if (est.includes("renuente")) return { label: "Fam. Renuente", color: "#8B0000", radius: 5 }; 
+            if (est.includes("negocio")) return { label: "Negocio", color: "#800080", radius: 5 }; 
             
             if (est.includes("con niños")) {
-                if (est.includes("no se registran")) return { label: "Con Niños (No Reg.)", color: "#FFEB3B", radius: 5 }; // Amarillo
-                // Usamos un tono verde distinto (#4CAF50) para no confundirlo con la vacuna
+                if (est.includes("no se registran")) return { label: "Con Niños (No Reg.)", color: "#FFEB3B", radius: 5 }; 
                 return { label: "Con Niños (Registrados)", color: "#4CAF50", radius: 5 }; 
             }
             if (est.includes("sin niños")) {
-                if (est.includes("pero se registra")) return { label: "Sin Niños (Sí Reg.)", color: "#03A9F4", radius: 5 }; // Azul Claro
-                return { label: "Sin Niños (Nadie Reg.)", color: "#000000", radius: 5 }; // Negro
+                if (est.includes("pero se registra")) return { label: "Sin Niños (Sí Reg.)", color: "#03A9F4", radius: 5 }; 
+                return { label: "Sin Niños (Nadie Reg.)", color: "#000000", radius: 5 }; 
             }
             
-            // Fallback de seguridad por si escriben algún texto fuera de catálogo
-            return { label: "Otro / Visita", color: "#00008B", radius: 4 }; // Azul Marino
+            // Fallback de seguridad
+            return { label: "Otro / Visita", color: "#00008B", radius: 4 }; 
         };
+
+        // Procesamiento Vectorial
         accionesDelDia.forEach(p => {
             let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
             if (latlong && String(latlong).includes(",")) {
@@ -999,6 +1002,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                     
                     if (!isNaN(lat) && !isNaN(lng)) {
                         puntos.push({ lat, lng, meta: evaluarSimbologia(p) });
+                        // Cálculo del Bounding Box
                         if (lat < minLat) minLat = lat;
                         if (lat > maxLat) maxLat = lat;
                         if (lng < minLng) minLng = lng;
@@ -1010,7 +1014,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
 
         if (puntos.length === 0) throw new Error("Registros sin GPS válido.");
         
-        // Salvaguarda si solo hay 1 punto
+        // Salvaguarda matemática para evitar división por cero si los puntos están en la misma coordenada
         if (maxLat - minLat < 0.0005) { maxLat += 0.002; minLat -= 0.002; }
         if (maxLng - minLng < 0.0005) { maxLng += 0.002; minLng -= 0.002; }
 
@@ -1022,7 +1026,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         while(zoom > 10) {
             minPx = latLngToPx(maxLat, minLng, zoom);
             maxPx = latLngToPx(minLat, maxLng, zoom);
-            // Aseguramos que la dispersión quepa en 700x400 píxeles
+            // Aseguramos que la dispersión quepa en la maquetación estricta de 700x400
             if ((maxPx.x - minPx.x) < 700 && (maxPx.y - minPx.y) < 400) break;
             zoom--;
         }
@@ -1032,17 +1036,19 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         const centerPx = latLngToPx(centerLat, centerLng, zoom);
         
         const mapW = 800; const mapH = 500;
-        const tlPx = { x: centerPx.x - mapW/2, y: centerPx.y - mapH/2 }; // Origen de la pantalla
+        const tlPx = { x: centerPx.x - mapW/2, y: centerPx.y - mapH/2 }; 
 
-        // Limites de los Tiles de OpenStreetMap a descargar
         const tMinX = Math.floor(tlPx.x / 256), tMaxX = Math.floor((tlPx.x + mapW) / 256);
         const tMinY = Math.floor(tlPx.y / 256), tMaxY = Math.floor((tlPx.y + mapH) / 256);
 
+        // ==========================================
+        // DESCARGA DE TILES (PROVEEDOR: ESRI ARCGIS)
+        // ==========================================
         const promesasTiles = [];
         for (let tx = tMinX; tx <= tMaxX; tx++) {
             for (let ty = tMinY; ty <= tMaxY; ty++) {
-                // Reemplazamos OSM por el servidor público de CartoCDN
-                let url = `https://a.basemaps.cartocdn.com/light_all/${zoom}/${tx}/${ty}.png`;
+                // Bypass Arquitectónico: Esri invierte ty y tx en su estructura REST
+                let url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${zoom}/${ty}/${tx}`;
                 promesasTiles.push(cargarTileOSM(url).then(img => ({ img, tx, ty })));
             }
         }
@@ -1057,17 +1063,17 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         canvas.width = mapW; canvas.height = mapH;
         const ctx = canvas.getContext("2d");
 
-        // Fondo por si algún cuadro falla o no hay internet
+        // Fondo preventivo (Gris claro)
         ctx.fillStyle = "#e5e3df"; ctx.fillRect(0, 0, mapW, mapH);
         
-        // Pinta el mapa base
+        // Pinta el mapa base de Esri
         tiles.forEach(t => {
             if(t && t.img) {
                 ctx.drawImage(t.img, (t.tx * 256) - tlPx.x, (t.ty * 256) - tlPx.y, 256, 256);
             }
         });
 
-        // Pinta la simbología
+        // Pinta la simbología vectorial
         puntos.forEach(pt => {
             let px = latLngToPx(pt.lat, pt.lng, zoom);
             let canvasX = px.x - tlPx.x;
@@ -1078,7 +1084,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
             ctx.fillStyle = pt.meta.color;
             ctx.fill();
             ctx.lineWidth = 1.5;
-            ctx.strokeStyle = "#FFFFFF"; // Contorno blanco para contraste sobre calles
+            ctx.strokeStyle = "#FFFFFF"; // Contorno para contraste
             ctx.stroke();
         });
 
@@ -1089,7 +1095,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         // ==========================================
         if (btn) btn.innerText = "Renderizando PDF...";
         const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('l', 'pt', 'letter');
+        const doc = new jsPDF('l', 'pt', 'letter'); // Maquetación estricta horizontal
         const pW = doc.internal.pageSize.width;
 
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
@@ -1102,14 +1108,14 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         let altoRender = mapH * (anchoRender / mapW);
         doc.addImage(mapaImagenBase64, 'PNG', 40, 70, anchoRender, altoRender);
 
-        // Agrupar conteos para la Leyenda
+        // Agrupar conteos dinámicos para la Leyenda
         let conteos = {};
         puntos.forEach(p => {
             if(!conteos[p.meta.label]) conteos[p.meta.label] = { count: 0, color: p.meta.color };
             conteos[p.meta.label].count++;
         });
 
-        // Grid de Leyenda a 3 columnas
+        // Grid de Leyenda a 3 columnas sin alterar métricas del PDF base
         const yLeyendaInicio = 70 + altoRender + 25;
         let col = 0, fila = 0;
         
@@ -1124,7 +1130,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
             doc.text(`${label} (${conteos[label].count})`, x + 12, y);
             
             col++;
-            if (col > 2) { col = 0; fila++; } // Salto de línea cada 3 ítems
+            if (col > 2) { col = 0; fila++; } 
         });
 
         doc.save(`Mapa_Operativo_${fecha}.pdf`);
