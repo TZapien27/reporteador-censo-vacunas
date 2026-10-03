@@ -1178,11 +1178,12 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                 doc.setFontSize(8); doc.setFont(undefined, 'normal');
             }
 
-            let calle = buscarDato(p, "calle") || "";
-            let num = buscarDato(p, "número exterior") || buscarDato(p, "numero exterior") || "";
+            let dirBruta = buscarDato(p, "dirección") || buscarDato(p, "direccion") || "S/D";
             let col = buscarDato(p, "colonia") || "";
-            let direccion = `${calle} ${num}, ${col}`.trim();
             
+            // Operador ternario para evitar comas huérfanas si la colonia viene en blanco
+            let direccion = col ? `${String(dirBruta).trim()}, ${String(col).trim()}` : String(dirBruta).trim();
+
             let dom = buscarDato(p, "domicilio visitado") || "S/D";
             let sit = buscarDato(p, "situación familiar") || buscarDato(p, "situacion familiar") || "S/D";
             
