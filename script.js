@@ -912,25 +912,75 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 }
 
 // ==========================================
-// 8. REPORTE: MAPA ESQUEMÁTICO RENDERIZADO 100% LOCAL (Sin APIs externas)
+// 8. REPORTE: MAPA GEOESPACIAL CON CAPA BASE Y SIMBOLOGÍA
 // ==========================================
+
+// Motor Matemático Web Mercator (Convierte GPS a Pixeles de pantalla)
+function latLngToPx(lat, lng, zoom) {
+    const x = ((lng + 180) / 360) * 256 * Math.pow(2, zoom);
+    const y = ((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2) * 256 * Math.pow(2, zoom);
+    return { x, y };
+}
+
+// Descargador Asíncrono de Cuadros de Mapa (Evade Tainted Canvas)
+async function cargarTileOSM(url) {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous"; // Petición limpia para Canvas
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null); // Si falla el internet, devuelve null pero no rompe el reporte
+        img.src = url;
+    });
+}
+
 async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     if (!fecha) {
-        alert("⚠️ Para generar el mapa, selecciona una Fecha Inicial exacta.");
+        alert("⚠️ Selecciona una Fecha Inicial exacta para el mapa.");
         return;
     }
 
     const btn = document.querySelector(".panel-acciones .btn-principal");
-    if (btn) btn.innerText = "Dibujando Esquema Geoespacial Local...";
+    if (btn) btn.innerText = "Descargando Cartografía Base...";
 
     try {
-        // 1. Filtrado Vectorial Estricto
         const accionesDelDia = datosUnificados.filter(p => normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha);
         if (accionesDelDia.length === 0) throw new Error("No hay acciones para esta fecha.");
 
-        // 2. Extracción de Coordenadas y Cálculo de Bounding Box (Límites)
         let puntos = [];
         let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+
+        // ==========================================
+        // DICCIONARIO DE SIMBOLOGÍA (Reglas de Negocio)
+        // ==========================================
+        const evaluarSimbologia = (registro) => {
+            // ⚠️ CAMBIA "estatus_vivienda" por el nombre de tu columna en AppSheet ⚠️
+            let est = String(buscarDato(registro, "Situación familiar") || "").toLowerCase();
+            
+            let huboVacuna = false;
+            if (registro._historialVacunas) {
+                registro._historialVacunas.forEach(v => {
+                    if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) huboVacuna = true;
+                });
+            }
+            
+            if (huboVacuna) return { label: "Vacuna Aplicada", color: "#FF0000", radius: 7 }; // Rojo Grande
+            
+            if (est.includes("ausente")) return { label: "Fam. Ausente", color: "#FF8C00", radius: 5 }; // Naranja
+            if (est.includes("renuente")) return { label: "Fam. Renuente", color: "#8B0000", radius: 5 }; // Rojo Oscuro
+            if (est.includes("deshabitada")) return { label: "Deshabitada", color: "#9E9E9E", radius: 5 }; // Gris
+            if (est.includes("baldío") || est.includes("baldio")) return { label: "Lote Baldío", color: "#8B4513", radius: 5 }; // Marrón
+            if (est.includes("negocio")) return { label: "Negocio", color: "#800080", radius: 5 }; // Morado
+            
+            if (est.includes("con niños")) {
+                if (est.includes("no se registran")) return { label: "Con Niños (No Reg.)", color: "#FFEB3B", radius: 5 }; // Amarillo
+                return { label: "Con Niños (Registrados)", color: "#4CAF50", radius: 5 }; // Verde
+            }
+            if (est.includes("sin niños")) {
+                if (est.includes("pero se registra")) return { label: "Sin Niños (Sí Reg.)", color: "#03A9F4", radius: 5 }; // Azul Claro
+                return { label: "Sin Niños (Nadie Reg.)", color: "#000000", radius: 5 }; // Negro
+            }
+            return { label: "Otro / Visita", color: "#00008B", radius: 4 }; 
+        };
 
         accionesDelDia.forEach(p => {
             let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
@@ -941,17 +991,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                     let lng = parseFloat(partes[1].replace(/[^0-9.-]/g, ""));
                     
                     if (!isNaN(lat) && !isNaN(lng)) {
-                        // REGLA DE NEGOCIO: Dosis hoy (Rojo) vs Solo visita (Azul)
-                        let color = "blue";
-                        if (p._historialVacunas) {
-                            p._historialVacunas.forEach(v => {
-                                if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) color = "red";
-                            });
-                        }
-                        
-                        puntos.push({ lat, lng, color });
-                        
-                        // Evaluar límites del mapa
+                        puntos.push({ lat, lng, meta: evaluarSimbologia(p) });
                         if (lat < minLat) minLat = lat;
                         if (lat > maxLat) maxLat = lat;
                         if (lng < minLng) minLng = lng;
@@ -961,86 +1001,130 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
             }
         });
 
-        if (puntos.length === 0) throw new Error("No hay coordenadas GPS válidas.");
+        if (puntos.length === 0) throw new Error("Registros sin GPS válido.");
+        
+        // Salvaguarda si solo hay 1 punto
+        if (maxLat - minLat < 0.0005) { maxLat += 0.002; minLat -= 0.002; }
+        if (maxLng - minLng < 0.0005) { maxLng += 0.002; minLng -= 0.002; }
 
-        // 3. RENDERIZADO NATIVO EN CANVAS HTML5 (Bypass absoluto de redes)
-        const mapWidth = 800;
-        const mapHeight = 500;
-        const padding = 40; // Margen interior para que los pines no toquen el borde
+        // ==========================================
+        // CÁLCULO DE ZOOM Y CUADRÍCULA MERCATOR
+        // ==========================================
+        let zoom = 19;
+        let minPx, maxPx;
+        while(zoom > 10) {
+            minPx = latLngToPx(maxLat, minLng, zoom);
+            maxPx = latLngToPx(minLat, maxLng, zoom);
+            // Aseguramos que la dispersión quepa en 700x400 píxeles
+            if ((maxPx.x - minPx.x) < 700 && (maxPx.y - minPx.y) < 400) break;
+            zoom--;
+        }
 
+        const centerLat = (minLat + maxLat) / 2;
+        const centerLng = (minLng + maxLng) / 2;
+        const centerPx = latLngToPx(centerLat, centerLng, zoom);
+        
+        const mapW = 800; const mapH = 500;
+        const tlPx = { x: centerPx.x - mapW/2, y: centerPx.y - mapH/2 }; // Origen de la pantalla
+
+        // Limites de los Tiles de OpenStreetMap a descargar
+        const tMinX = Math.floor(tlPx.x / 256), tMaxX = Math.floor((tlPx.x + mapW) / 256);
+        const tMinY = Math.floor(tlPx.y / 256), tMaxY = Math.floor((tlPx.y + mapH) / 256);
+
+        const promesasTiles = [];
+        for (let tx = tMinX; tx <= tMaxX; tx++) {
+            for (let ty = tMinY; ty <= tMaxY; ty++) {
+                let url = `https://tile.openstreetmap.org/${zoom}/${tx}/${ty}.png`;
+                promesasTiles.push(cargarTileOSM(url).then(img => ({ img, tx, ty })));
+            }
+        }
+        
+        const tiles = await Promise.all(promesasTiles);
+
+        // ==========================================
+        // RENDERIZADO EN CANVAS (Offline-safe)
+        // ==========================================
+        if (btn) btn.innerText = "Dibujando Coordenadas...";
         const canvas = document.createElement("canvas");
-        canvas.width = mapWidth;
-        canvas.height = mapHeight;
+        canvas.width = mapW; canvas.height = mapH;
         const ctx = canvas.getContext("2d");
 
-        // Fondo del mapa (Gris claro)
-        ctx.fillStyle = "#f4f4f4";
-        ctx.fillRect(0, 0, mapWidth, mapHeight);
+        // Fondo por si algún cuadro falla o no hay internet
+        ctx.fillStyle = "#e5e3df"; ctx.fillRect(0, 0, mapW, mapH);
         
-        // Cuadrícula decorativa para simular cartografía
-        ctx.strokeStyle = "#e0e0e0";
-        ctx.lineWidth = 1;
-        for(let i=0; i<mapWidth; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,mapHeight); ctx.stroke(); }
-        for(let i=0; i<mapHeight; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(mapWidth,i); ctx.stroke(); }
+        // Pinta el mapa base
+        tiles.forEach(t => {
+            if(t && t.img) {
+                ctx.drawImage(t.img, (t.tx * 256) - tlPx.x, (t.ty * 256) - tlPx.y, 256, 256);
+            }
+        });
 
-        // Salvaguarda matemática: Si solo hay 1 punto o están muy juntos, forzamos un rango visible
-        if (maxLat - minLat < 0.0001) { maxLat += 0.001; minLat -= 0.001; }
-        if (maxLng - minLng < 0.0001) { maxLng += 0.001; minLng -= 0.001; }
-
-        // Matemática de traslación: GPS -> Pixeles
+        // Pinta la simbología
         puntos.forEach(pt => {
-            let x = padding + ((pt.lng - minLng) / (maxLng - minLng)) * (mapWidth - padding * 2);
-            // La latitud se invierte porque en GPS sube hacia el norte, pero en Canvas 'Y' baja hacia el sur
-            let y = mapHeight - padding - ((pt.lat - minLat) / (maxLat - minLat)) * (mapHeight - padding * 2);
-
+            let px = latLngToPx(pt.lat, pt.lng, zoom);
+            let canvasX = px.x - tlPx.x;
+            let canvasY = px.y - tlPx.y;
+            
             ctx.beginPath();
-            ctx.arc(x, y, 6, 0, 2 * Math.PI); // Círculo de 6px
-            ctx.fillStyle = pt.color;
+            ctx.arc(canvasX, canvasY, pt.meta.radius, 0, 2 * Math.PI);
+            ctx.fillStyle = pt.meta.color;
             ctx.fill();
             ctx.lineWidth = 1.5;
-            ctx.strokeStyle = (pt.color === "red") ? "#8b0000" : "#00008b"; // Borde oscuro
+            ctx.strokeStyle = "#FFFFFF"; // Contorno blanco para contraste sobre calles
             ctx.stroke();
         });
 
-        // Convertir el lienzo a imagen de forma segura
         const mapaImagenBase64 = canvas.toDataURL("image/png");
 
+        // ==========================================
+        // INYECCIÓN jsPDF Y GENERACIÓN DE LEYENDA GRID
+        // ==========================================
         if (btn) btn.innerText = "Renderizando PDF...";
-
-        // 4. INYECCIÓN EN jsPDF
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('l', 'pt', 'letter');
         const pW = doc.internal.pageSize.width;
 
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
-        doc.text("MAPA ESQUEMÁTICO DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
+        doc.text("MAPA OPERATIVO DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
         
         doc.setFontSize(10); doc.setTextColor(0);
         doc.text(`FECHA DE LA JORNADA: ${fecha} | Puntos Trazados: ${puntos.length}`, pW / 2, 55, { align: 'center' });
 
         let anchoRender = pW - 80;
-        let altoRender = mapHeight * (anchoRender / mapWidth);
-        doc.addImage(mapaImagenBase64, 'PNG', 40, 80, anchoRender, altoRender);
+        let altoRender = mapH * (anchoRender / mapW);
+        doc.addImage(mapaImagenBase64, 'PNG', 40, 70, anchoRender, altoRender);
 
-        // Leyenda y Conteo
-        let totalRojos = puntos.filter(p => p.color === 'red').length;
-        let totalAzules = puntos.length - totalRojos;
-        const yLeyenda = 80 + altoRender + 30;
+        // Agrupar conteos para la Leyenda
+        let conteos = {};
+        puntos.forEach(p => {
+            if(!conteos[p.meta.label]) conteos[p.meta.label] = { count: 0, color: p.meta.color };
+            conteos[p.meta.label].count++;
+        });
 
-        doc.setFontSize(9); doc.setFont(undefined, 'bold');
-        doc.setTextColor(255, 0, 0); doc.text(`■ PIN ROJO (${totalRojos}):`, 40, yLeyenda);
-        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Domicilio con vacuna aplicada.", 130, yLeyenda);
+        // Grid de Leyenda a 3 columnas
+        const yLeyendaInicio = 70 + altoRender + 25;
+        let col = 0, fila = 0;
         
-        doc.setFont(undefined, 'bold'); doc.setTextColor(0, 0, 255); doc.text(`■ PIN AZUL (${totalAzules}):`, 320, yLeyenda);
-        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Visita realizada (censado sin vacuna).", 410, yLeyenda);
+        Object.keys(conteos).forEach(label => {
+            let x = 40 + (col * 240);
+            let y = yLeyendaInicio + (fila * 16);
+            
+            doc.setFillColor(conteos[label].color);
+            doc.circle(x, y - 4, 5, 'F');
+            doc.setTextColor(0);
+            doc.setFontSize(9); doc.setFont(undefined, 'normal');
+            doc.text(`${label} (${conteos[label].count})`, x + 12, y);
+            
+            col++;
+            if (col > 2) { col = 0; fila++; } // Salto de línea cada 3 ítems
+        });
 
-        doc.save(`Mapa_Esquematico_${fecha}.pdf`);
-        
+        doc.save(`Mapa_Operativo_${fecha}.pdf`);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
-        alert("✅ Mapa Esquemático PDF generado exitosamente.");
+        alert("✅ Mapa Operativo PDF generado exitosamente.");
 
     } catch (error) {
-        console.error(error);
+        console.error("Error Geográfico:", error);
         alert(error.message);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
     }
