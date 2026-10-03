@@ -912,110 +912,135 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 }
 
 // ==========================================
-// 8. REPORTE: MAPA RASTERIZADO EN PDF (Vía Proxy GET Comprimido)
+// 8. REPORTE: MAPA ESQUEMÁTICO RENDERIZADO 100% LOCAL (Sin APIs externas)
 // ==========================================
 async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     if (!fecha) {
-        alert("⚠️ Para generar el mapa, debes seleccionar obligatoriamente una Fecha Inicial exacta.");
+        alert("⚠️ Para generar el mapa, selecciona una Fecha Inicial exacta.");
         return;
     }
 
     const btn = document.querySelector(".panel-acciones .btn-principal");
-    if (btn) btn.innerText = "Procesando Vectores Geoespaciales...";
+    if (btn) btn.innerText = "Dibujando Esquema Geoespacial Local...";
 
     try {
         // 1. Filtrado Vectorial Estricto
         const accionesDelDia = datosUnificados.filter(p => normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha);
-        if (accionesDelDia.length === 0) throw new Error("No hay acciones registradas para la fecha seleccionada.");
+        if (accionesDelDia.length === 0) throw new Error("No hay acciones para esta fecha.");
 
-        let redMarkers = [];
-        let blueMarkers = [];
+        // 2. Extracción de Coordenadas y Cálculo de Bounding Box (Límites)
+        let puntos = [];
+        let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
 
-        // 2. Extracción y Compresión Geométrica (Evita el colapso de la URL)
         accionesDelDia.forEach(p => {
             let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
-            
             if (latlong && String(latlong).includes(",")) {
                 let partes = String(latlong).split(",");
-                if (partes.length === 2) {
-                    // Redondeo a 4 decimales: Precisión de ~11 metros, ahorra un 40% de caracteres en la URL
-                    let lat = parseFloat(partes[0].replace(/[^0-9.-]/g, "")).toFixed(4);
-                    let lng = parseFloat(partes[1].replace(/[^0-9.-]/g, "")).toFixed(4);
-                    let limpia = `${lat},${lng}`;
+                if (partes.length >= 2) {
+                    let lat = parseFloat(partes[0].replace(/[^0-9.-]/g, ""));
+                    let lng = parseFloat(partes[1].replace(/[^0-9.-]/g, ""));
                     
-                    let huboVacunaHoy = false;
-                    if (p._historialVacunas) {
-                        p._historialVacunas.forEach(v => {
-                            if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) huboVacunaHoy = true;
-                        });
+                    if (!isNaN(lat) && !isNaN(lng)) {
+                        // REGLA DE NEGOCIO: Dosis hoy (Rojo) vs Solo visita (Azul)
+                        let color = "blue";
+                        if (p._historialVacunas) {
+                            p._historialVacunas.forEach(v => {
+                                if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) color = "red";
+                            });
+                        }
+                        
+                        puntos.push({ lat, lng, color });
+                        
+                        // Evaluar límites del mapa
+                        if (lat < minLat) minLat = lat;
+                        if (lat > maxLat) maxLat = lat;
+                        if (lng < minLng) minLng = lng;
+                        if (lng > maxLng) maxLng = lng;
                     }
-                    
-                    if (huboVacunaHoy) redMarkers.push(limpia);
-                    else blueMarkers.push(limpia);
                 }
             }
         });
 
-        if (redMarkers.length === 0 && blueMarkers.length === 0) throw new Error("Hay registros, pero sin coordenadas GPS válidas.");
+        if (puntos.length === 0) throw new Error("No hay coordenadas GPS válidas.");
 
-        // 3. CONSTRUCCIÓN DE PARÁMETROS COMPRIMIDOS
-        let pinesParams = "";
-        if (redMarkers.length > 0) pinesParams += `&markers=color:red%7C${redMarkers.join('%7C')}`;
-        if (blueMarkers.length > 0) pinesParams += `&markers=color:blue%7C${blueMarkers.join('%7C')}`;
+        // 3. RENDERIZADO NATIVO EN CANVAS HTML5 (Bypass absoluto de redes)
+        const mapWidth = 800;
+        const mapHeight = 500;
+        const padding = 40; // Margen interior para que los pines no toquen el borde
 
-        if (btn) btn.innerText = "Descargando Mapa (Netlify Edge Proxy)...";
+        const canvas = document.createElement("canvas");
+        canvas.width = mapWidth;
+        canvas.height = mapHeight;
+        const ctx = canvas.getContext("2d");
 
-        // 4. PETICIÓN GET AL PROXY DE NETLIFY
-        // Al usar GET, QuickChart reconoce la ruta. Netlify intercepta la llamada y evade el bloqueo CORS.
-        const urlProxy = `/api/mapa?size=800x500&format=png${pinesParams}`;
+        // Fondo del mapa (Gris claro)
+        ctx.fillStyle = "#f4f4f4";
+        ctx.fillRect(0, 0, mapWidth, mapHeight);
         
-        const response = await fetch(urlProxy, { method: 'GET' });
+        // Cuadrícula decorativa para simular cartografía
+        ctx.strokeStyle = "#e0e0e0";
+        ctx.lineWidth = 1;
+        for(let i=0; i<mapWidth; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,mapHeight); ctx.stroke(); }
+        for(let i=0; i<mapHeight; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(mapWidth,i); ctx.stroke(); }
 
-        if (!response.ok) {
-            throw new Error(`Fallo en la comunicación con el servidor de mapas (Error ${response.status}).`);
-        }
+        // Salvaguarda matemática: Si solo hay 1 punto o están muy juntos, forzamos un rango visible
+        if (maxLat - minLat < 0.0001) { maxLat += 0.001; minLat -= 0.001; }
+        if (maxLng - minLng < 0.0001) { maxLng += 0.001; minLng -= 0.001; }
 
-        // 5. CONVERSIÓN A BASE64 PARA INYECCIÓN SEGURA EN PDF
-        const blob = await response.blob();
-        const mapaImagenBase64 = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result);
-            reader.onerror = () => reject(new Error("Fallo al decodificar la imagen del mapa."));
-            reader.readAsDataURL(blob);
+        // Matemática de traslación: GPS -> Pixeles
+        puntos.forEach(pt => {
+            let x = padding + ((pt.lng - minLng) / (maxLng - minLng)) * (mapWidth - padding * 2);
+            // La latitud se invierte porque en GPS sube hacia el norte, pero en Canvas 'Y' baja hacia el sur
+            let y = mapHeight - padding - ((pt.lat - minLat) / (maxLat - minLat)) * (mapHeight - padding * 2);
+
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, 2 * Math.PI); // Círculo de 6px
+            ctx.fillStyle = pt.color;
+            ctx.fill();
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = (pt.color === "red") ? "#8b0000" : "#00008b"; // Borde oscuro
+            ctx.stroke();
         });
+
+        // Convertir el lienzo a imagen de forma segura
+        const mapaImagenBase64 = canvas.toDataURL("image/png");
 
         if (btn) btn.innerText = "Renderizando PDF...";
 
-        // 6. INYECCIÓN EN jsPDF
+        // 4. INYECCIÓN EN jsPDF
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('l', 'pt', 'letter');
         const pW = doc.internal.pageSize.width;
-        const mapWidth = 800; const mapHeight = 500;
 
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
-        doc.text("MAPA DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
+        doc.text("MAPA ESQUEMÁTICO DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
         
         doc.setFontSize(10); doc.setTextColor(0);
-        doc.text(`FECHA DE LA JORNADA: ${fecha} | Pines Totales: ${redMarkers.length + blueMarkers.length}`, pW / 2, 55, { align: 'center' });
+        doc.text(`FECHA DE LA JORNADA: ${fecha} | Puntos Trazados: ${puntos.length}`, pW / 2, 55, { align: 'center' });
 
         let anchoRender = pW - 80;
         let altoRender = mapHeight * (anchoRender / mapWidth);
         doc.addImage(mapaImagenBase64, 'PNG', 40, 80, anchoRender, altoRender);
 
+        // Leyenda y Conteo
+        let totalRojos = puntos.filter(p => p.color === 'red').length;
+        let totalAzules = puntos.length - totalRojos;
         const yLeyenda = 80 + altoRender + 30;
-        doc.setFontSize(9); doc.setFont(undefined, 'bold');
-        doc.setTextColor(255, 0, 0); doc.text(`■ PIN ROJO (${redMarkers.length}):`, 40, yLeyenda);
-        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Domicilio con aplicación de vacuna.", 115, yLeyenda);
-        
-        doc.setFont(undefined, 'bold'); doc.setTextColor(0, 0, 255); doc.text(`■ PIN AZUL (${blueMarkers.length}):`, 320, yLeyenda);
-        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Visita realizada (censado sin vacuna hoy).", 395, yLeyenda);
 
-        doc.save(`Mapa_Acciones_${fecha}.pdf`);
+        doc.setFontSize(9); doc.setFont(undefined, 'bold');
+        doc.setTextColor(255, 0, 0); doc.text(`■ PIN ROJO (${totalRojos}):`, 40, yLeyenda);
+        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Domicilio con vacuna aplicada.", 130, yLeyenda);
+        
+        doc.setFont(undefined, 'bold'); doc.setTextColor(0, 0, 255); doc.text(`■ PIN AZUL (${totalAzules}):`, 320, yLeyenda);
+        doc.setTextColor(0); doc.setFont(undefined, 'normal'); doc.text("Visita realizada (censado sin vacuna).", 410, yLeyenda);
+
+        doc.save(`Mapa_Esquematico_${fecha}.pdf`);
+        
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
-        alert("✅ Mapa PDF generado exitosamente.");
+        alert("✅ Mapa Esquemático PDF generado exitosamente.");
 
     } catch (error) {
-        console.error("Error Geográfico:", error);
+        console.error(error);
         alert(error.message);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
     }
