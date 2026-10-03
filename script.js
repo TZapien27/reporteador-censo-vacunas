@@ -912,35 +912,89 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 }
 
 // ==========================================
-// 8. REPORTE: MAPA GEOESPACIAL LOCAL (ESRI + SIMBOLOGÍA EXACTA)
+// 8. REPORTE: MAPA GEOESPACIAL LOCAL (ENCABEZADOS DINÁMICOS Y SIMBOLOGÍA B/W)
 // ==========================================
 
-// Motor Matemático Web Mercator (Convierte GPS a Pixeles de pantalla)
 function latLngToPx(lat, lng, zoom) {
     const x = ((lng + 180) / 360) * 256 * Math.pow(2, zoom);
     const y = ((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2) * 256 * Math.pow(2, zoom);
     return { x, y };
 }
 
-// Descargador Asíncrono de Cuadros de Mapa (Evade Tainted Canvas)
 async function cargarTileOSM(url) {
     return new Promise((resolve) => {
         const img = new Image();
-        img.crossOrigin = "Anonymous"; // Petición limpia para habilitar exportación a PDF
+        img.crossOrigin = "Anonymous";
         img.onload = () => resolve(img);
-        img.onerror = () => resolve(null); // Fallback silencioso sin romper el reporte
+        img.onerror = () => resolve(null);
         img.src = url;
     });
 }
 
+// Subrutinas de Renderizado de Figuras Geométricas
+function drawCanvasShape(ctx, x, y, meta) {
+    let r = meta.radius;
+    ctx.beginPath();
+    
+    if (meta.isOutline) {
+        ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = meta.color; ctx.lineWidth = 2;
+    } else {
+        ctx.fillStyle = meta.color; ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1;
+    }
+
+    if (meta.shape === 'circle') {
+        ctx.arc(x, y, r, 0, 2 * Math.PI);
+    } else if (meta.shape === 'square') {
+        ctx.rect(x - r, y - r, r * 2, r * 2);
+    } else if (meta.shape === 'triangle') {
+        ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r); ctx.lineTo(x - r, y + r); ctx.closePath();
+    } else if (meta.shape === 'triangle-down') {
+        ctx.moveTo(x, y + r); ctx.lineTo(x + r, y - r); ctx.lineTo(x - r, y - r); ctx.closePath();
+    } else if (meta.shape === 'diamond') {
+        ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
+    } else if (meta.shape === 'cross') {
+        ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
+        ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r);
+    }
+
+    if (meta.shape === 'cross') {
+        ctx.strokeStyle = meta.color; ctx.lineWidth = 3; ctx.stroke();
+    } else {
+        ctx.fill(); ctx.stroke();
+    }
+}
+
+function drawPdfShape(doc, x, y, meta) {
+    let r = meta.radius;
+    let style = meta.isOutline ? 'D' : 'FD'; // D = Solo contorno, FD = Relleno y Contorno
+    if (meta.shape === 'cross') style = 'D';
+
+    doc.setFillColor(meta.isOutline ? '#FFFFFF' : meta.color);
+    doc.setDrawColor(meta.color);
+    doc.setLineWidth(meta.isOutline || meta.shape === 'cross' ? 1.5 : 0.5);
+
+    if (meta.shape === 'circle') doc.circle(x, y, r, style);
+    else if (meta.shape === 'square') doc.rect(x - r, y - r, r * 2, r * 2, style);
+    else if (meta.shape === 'triangle') doc.triangle(x, y - r, x + r, y + r, x - r, y + r, style);
+    else if (meta.shape === 'triangle-down') doc.triangle(x, y + r, x + r, y - r, x - r, y - r, style);
+    else if (meta.shape === 'diamond') {
+        doc.triangle(x - r, y, x + r, y, x, y - r, style); // Triángulo superior
+        doc.triangle(x - r, y, x + r, y, x, y + r, style); // Triángulo inferior
+    } 
+    else if (meta.shape === 'cross') {
+        doc.line(x - r, y - r, x + r, y + r);
+        doc.line(x + r, y - r, x - r, y + r);
+    }
+}
+
 async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
     if (!fecha) {
-        alert("⚠️️ Selecciona una Fecha Inicial exacta para el mapa.");
+        alert("⚠ Selecciona una Fecha Inicial exacta para el mapa.");
         return;
     }
 
     const btn = document.querySelector(".panel-acciones .btn-principal");
-    if (btn) btn.innerText = "Descargando Cartografía Base (Esri)...";
+    if (btn) btn.innerText = "Calculando Geometría Vectorial...";
 
     try {
         const accionesDelDia = datosUnificados.filter(p => normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha);
@@ -950,13 +1004,11 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
 
         // ==========================================
-        // DICCIONARIO DE SIMBOLOGÍA (Reglas de Negocio)
+        // DICCIONARIO DE SIMBOLOGÍA (B/W COMPATIBLE)
         // ==========================================
         const evaluarSimbologia = (registro) => {
-            // EXTRACCIÓN EXACTA: Llave de la columna "situación familiar"
-            // Se prevén variaciones de acentos para garantizar la conexión con el JSON
-            let valorBruto = buscarDato(registro, "situación familiar") || buscarDato(registro, "situacion familiar") || "";
-            let est = String(valorBruto).toLowerCase().trim();
+            let dom = String(buscarDato(registro, "domicilio visitado") || "").toLowerCase().trim();
+            let sit = String(buscarDato(registro, "situación familiar") || buscarDato(registro, "situacion familiar") || "").toLowerCase().trim();
             
             let huboVacuna = false;
             if (registro._historialVacunas) {
@@ -965,33 +1017,33 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                 });
             }
             
-            // 1. Prioridad Absoluta: Vacuna aplicada hoy (VERDE, pin grande)
-            if (huboVacuna) return { label: "Vacuna Aplicada", color: "#008000", radius: 7 }; 
+            // 1. Vacuna Aplicada (Círculo sólido grande Verde oscuro)
+            if (huboVacuna) return { label: "Vacuna Aplicada", color: "#006400", shape: "circle", isOutline: false, radius: 7 };
             
-            // 2. Control de Nulos/Vacíos y Agrupación (Atrapa exactamente los registros vacíos o deshabitados)
-            if (est === "" || est.includes("deshabitada") || est.includes("baldío") || est.includes("baldio")) {
-                return { label: "Deshabitadas / Baldíos", color: "#9E9E9E", radius: 5 }; // Gris
-            }
+            // 2. Domicilio Visitado
+            if (dom.includes("baldío") || dom.includes("baldio") || dom.includes("deshabitada")) 
+                return { label: "Deshabitadas / Baldíos", color: "#9E9E9E", shape: "square", isOutline: false, radius: 5 };
+            if (dom.includes("negocio")) 
+                return { label: "Negocio", color: "#800080", shape: "diamond", isOutline: false, radius: 5 };
 
-            // 3. Procesamiento de los registros restantes con datos válidos
-            if (est.includes("ausente")) return { label: "Fam. Ausente", color: "#FF8C00", radius: 5 }; 
-            if (est.includes("renuente")) return { label: "Fam. Renuente", color: "#8B0000", radius: 5 }; 
-            if (est.includes("negocio")) return { label: "Negocio", color: "#800080", radius: 5 }; 
+            // 3. Situación Familiar
+            if (sit.includes("ausente")) return { label: "Fam. Ausente", color: "#FF8C00", shape: "triangle", isOutline: false, radius: 5 };
+            if (sit.includes("renuente")) return { label: "Fam. Renuente", color: "#8B0000", shape: "cross", isOutline: false, radius: 5 };
             
-            if (est.includes("con niños")) {
-                if (est.includes("no se registran")) return { label: "Con Niños (No Reg.)", color: "#FFEB3B", radius: 5 }; 
-                return { label: "Con Niños (Registrados)", color: "#4CAF50", radius: 5 }; 
-            }
-            if (est.includes("sin niños")) {
-                if (est.includes("pero se registra")) return { label: "Sin Niños (Sí Reg.)", color: "#03A9F4", radius: 5 }; 
-                return { label: "Sin Niños (Nadie Reg.)", color: "#000000", radius: 5 }; 
-            }
+            if (sit.includes("con niños") && sit.includes("no se registran")) 
+                return { label: "Con Niños (No Reg.)", color: "#D4AC0D", shape: "triangle-down", isOutline: false, radius: 5 };
+            if (sit.includes("con niños")) 
+                return { label: "Con Niños (Registrados)", color: "#2E86C1", shape: "circle", isOutline: false, radius: 5 };
             
-            // Fallback de seguridad
-            return { label: "Otro / Visita", color: "#00008B", radius: 4 }; 
+            if (sit.includes("sin niños") && (sit.includes("ninguna") || sit.includes("no se registra"))) 
+                return { label: "Sin Niños (Nadie Reg.)", color: "#000000", shape: "square", isOutline: true, radius: 5 };
+            if (sit.includes("sin niños")) 
+                return { label: "Sin Niños (Sí Reg.)", color: "#E74C3C", shape: "circle", isOutline: true, radius: 5 };
+            
+            // Fallback
+            return { label: "Otro / Indefinido", color: "#333333", shape: "circle", isOutline: true, radius: 4 };
         };
 
-        // Procesamiento Vectorial
         accionesDelDia.forEach(p => {
             let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
             if (latlong && String(latlong).includes(",")) {
@@ -1002,7 +1054,6 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                     
                     if (!isNaN(lat) && !isNaN(lng)) {
                         puntos.push({ lat, lng, meta: evaluarSimbologia(p) });
-                        // Cálculo del Bounding Box
                         if (lat < minLat) minLat = lat;
                         if (lat > maxLat) maxLat = lat;
                         if (lng < minLng) minLng = lng;
@@ -1013,121 +1064,127 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         });
 
         if (puntos.length === 0) throw new Error("Registros sin GPS válido.");
-        
-        // Salvaguarda matemática para evitar división por cero si los puntos están en la misma coordenada
         if (maxLat - minLat < 0.0005) { maxLat += 0.002; minLat -= 0.002; }
         if (maxLng - minLng < 0.0005) { maxLng += 0.002; minLng -= 0.002; }
 
-        // ==========================================
-        // CÁLCULO DE ZOOM Y CUADRÍCULA MERCATOR
-        // ==========================================
         let zoom = 19;
         let minPx, maxPx;
         while(zoom > 10) {
             minPx = latLngToPx(maxLat, minLng, zoom);
             maxPx = latLngToPx(minLat, maxLng, zoom);
-            // Aseguramos que la dispersión quepa en la maquetación estricta de 700x400
-            if ((maxPx.x - minPx.x) < 700 && (maxPx.y - minPx.y) < 400) break;
+            if ((maxPx.x - minPx.x) < 700 && (maxPx.y - minPx.y) < 320) break; // Altura reducida para dar espacio al nuevo encabezado
             zoom--;
         }
 
-        const centerLat = (minLat + maxLat) / 2;
-        const centerLng = (minLng + maxLng) / 2;
-        const centerPx = latLngToPx(centerLat, centerLng, zoom);
-        
-        const mapW = 800; const mapH = 500;
+        const centerPx = latLngToPx((minLat + maxLat) / 2, (minLng + maxLng) / 2, zoom);
+        const mapW = 800; const mapH = 400; // Ajustado para formato apaisado con más margen superior
         const tlPx = { x: centerPx.x - mapW/2, y: centerPx.y - mapH/2 }; 
 
         const tMinX = Math.floor(tlPx.x / 256), tMaxX = Math.floor((tlPx.x + mapW) / 256);
         const tMinY = Math.floor(tlPx.y / 256), tMaxY = Math.floor((tlPx.y + mapH) / 256);
 
-        // ==========================================
-        // DESCARGA DE TILES (PROVEEDOR: ESRI ARCGIS)
-        // ==========================================
+        if (btn) btn.innerText = "Descargando Cartografía Base (Esri)...";
         const promesasTiles = [];
         for (let tx = tMinX; tx <= tMaxX; tx++) {
             for (let ty = tMinY; ty <= tMaxY; ty++) {
-                // Bypass Arquitectónico: Esri invierte ty y tx en su estructura REST
                 let url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${zoom}/${ty}/${tx}`;
                 promesasTiles.push(cargarTileOSM(url).then(img => ({ img, tx, ty })));
             }
         }
-        
         const tiles = await Promise.all(promesasTiles);
 
-        // ==========================================
-        // RENDERIZADO EN CANVAS (Offline-safe)
-        // ==========================================
-        if (btn) btn.innerText = "Dibujando Coordenadas...";
         const canvas = document.createElement("canvas");
         canvas.width = mapW; canvas.height = mapH;
         const ctx = canvas.getContext("2d");
 
-        // Fondo preventivo (Gris claro)
         ctx.fillStyle = "#e5e3df"; ctx.fillRect(0, 0, mapW, mapH);
-        
-        // Pinta el mapa base de Esri
         tiles.forEach(t => {
-            if(t && t.img) {
-                ctx.drawImage(t.img, (t.tx * 256) - tlPx.x, (t.ty * 256) - tlPx.y, 256, 256);
-            }
+            if(t && t.img) ctx.drawImage(t.img, (t.tx * 256) - tlPx.x, (t.ty * 256) - tlPx.y, 256, 256);
         });
 
-        // Pinta la simbología vectorial
         puntos.forEach(pt => {
             let px = latLngToPx(pt.lat, pt.lng, zoom);
-            let canvasX = px.x - tlPx.x;
-            let canvasY = px.y - tlPx.y;
-            
-            ctx.beginPath();
-            ctx.arc(canvasX, canvasY, pt.meta.radius, 0, 2 * Math.PI);
-            ctx.fillStyle = pt.meta.color;
-            ctx.fill();
-            ctx.lineWidth = 1.5;
-            ctx.strokeStyle = "#FFFFFF"; // Contorno para contraste
-            ctx.stroke();
+            drawCanvasShape(ctx, px.x - tlPx.x, px.y - tlPx.y, pt.meta);
         });
 
         const mapaImagenBase64 = canvas.toDataURL("image/png");
 
         // ==========================================
-        // INYECCIÓN jsPDF Y GENERACIÓN DE LEYENDA GRID
+        // EXTRACCIÓN DINÁMICA DE ENCABEZADOS (Set)
         // ==========================================
         if (btn) btn.innerText = "Renderizando PDF...";
+        let ref = accionesDelDia[0]; // Muestra representativa de la jornada
+        let v_inst = buscarDato(ref, "institución que reporta la actividad") || buscarDato(ref, "institución") || "N/A";
+        let v_tipo = buscarDato(ref, "tipo de actividad") || "N/A";
+        let v_identificador = buscarDato(ref, "identificador") || "N/A";
+
+        // Filtro de arrays únicos
+        let arrAgebs = [...new Set(accionesDelDia.map(p => buscarDato(p, "ageb")).filter(Boolean))];
+        let v_agebs = arrAgebs.length > 0 ? arrAgebs.join(", ") : "N/A";
+        
+        let arrColonias = [...new Set(accionesDelDia.map(p => buscarDato(p, "colonia")).filter(Boolean))];
+        let v_colonias = arrColonias.length > 0 ? arrColonias.join(", ") : "N/A";
+
+        // ==========================================
+        // INYECCIÓN jsPDF Y MAQUETACIÓN
+        // ==========================================
         const { jsPDF } = window.jspdf;
-        const doc = new jsPDF('l', 'pt', 'letter'); // Maquetación estricta horizontal
+        const doc = new jsPDF('l', 'pt', 'letter');
         const pW = doc.internal.pageSize.width;
 
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
-        doc.text("MAPA OPERATIVO DE ACCIONES EN TERRENO", pW / 2, 40, { align: 'center' });
+        doc.text("MAPA OPERATIVO DE ACCIONES EN TERRENO", pW / 2, 35, { align: 'center' });
         
-        doc.setFontSize(10); doc.setTextColor(0);
-        doc.text(`FECHA DE LA JORNADA: ${fecha} | Puntos Trazados: ${puntos.length}`, pW / 2, 55, { align: 'center' });
+        // Bloque de metadatos (Encabezados) a dos columnas
+        doc.setFontSize(9); doc.setTextColor(0);
+        
+        // Columna Izquierda
+        doc.setFont(undefined, 'bold'); doc.text("Fecha de la actividad:", 40, 55);
+        doc.setFont(undefined, 'normal'); doc.text(fecha, 150, 55);
+        
+        doc.setFont(undefined, 'bold'); doc.text("Institución que reporta:", 40, 70);
+        doc.setFont(undefined, 'normal'); doc.text(v_inst, 150, 70);
+        
+        doc.setFont(undefined, 'bold'); doc.text("Tipo de actividad:", 40, 85);
+        doc.setFont(undefined, 'normal'); doc.text(v_tipo, 150, 85);
 
+        // Columna Derecha
+        doc.setFont(undefined, 'bold'); doc.text("Identificador (AGEB/Módulo):", pW/2, 55);
+        doc.setFont(undefined, 'normal'); doc.text(v_identificador, pW/2 + 140, 55);
+        
+        doc.setFont(undefined, 'bold'); doc.text("AGEB(s) trabajados:", pW/2, 70);
+        doc.setFont(undefined, 'normal'); doc.text(v_agebs, pW/2 + 105, 70);
+        
+        doc.setFont(undefined, 'bold'); doc.text("Colonia(s):", pW/2, 85);
+        // Función split para evitar que un string muy largo de colonias rompa el margen derecho
+        let colShort = doc.splitTextToSize(v_colonias, pW/2 - 70);
+        doc.setFont(undefined, 'normal'); doc.text(colShort, pW/2 + 55, 85);
+
+        // Ajuste vertical del mapa para acomodar el nuevo encabezado
+        const yMapStart = 110; 
         let anchoRender = pW - 80;
         let altoRender = mapH * (anchoRender / mapW);
-        doc.addImage(mapaImagenBase64, 'PNG', 40, 70, anchoRender, altoRender);
+        doc.addImage(mapaImagenBase64, 'PNG', 40, yMapStart, anchoRender, altoRender);
 
-        // Agrupar conteos dinámicos para la Leyenda
+        // Grid de Leyenda de Simbología Geométrica
         let conteos = {};
         puntos.forEach(p => {
-            if(!conteos[p.meta.label]) conteos[p.meta.label] = { count: 0, color: p.meta.color };
-            conteos[p.meta.label].count++;
+            let key = JSON.stringify(p.meta);
+            if(!conteos[key]) conteos[key] = { meta: p.meta, count: 0 };
+            conteos[key].count++;
         });
 
-        // Grid de Leyenda a 3 columnas sin alterar métricas del PDF base
-        const yLeyendaInicio = 70 + altoRender + 25;
+        const yLeyendaInicio = yMapStart + altoRender + 25;
         let col = 0, fila = 0;
         
-        Object.keys(conteos).forEach(label => {
+        Object.values(conteos).forEach(item => {
             let x = 40 + (col * 240);
             let y = yLeyendaInicio + (fila * 16);
             
-            doc.setFillColor(conteos[label].color);
-            doc.circle(x, y - 4, 5, 'F');
-            doc.setTextColor(0);
-            doc.setFontSize(9); doc.setFont(undefined, 'normal');
-            doc.text(`${label} (${conteos[label].count})`, x + 12, y);
+            drawPdfShape(doc, x + 5, y - 3, item.meta);
+            
+            doc.setTextColor(0); doc.setFontSize(9); doc.setFont(undefined, 'normal');
+            doc.text(`${item.meta.label} (${item.count})`, x + 16, y);
             
             col++;
             if (col > 2) { col = 0; fila++; } 
@@ -1135,10 +1192,10 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
 
         doc.save(`Mapa_Operativo_${fecha}.pdf`);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
-        alert("✅ Mapa Operativo PDF generado exitosamente.");
+        alert("✅ Mapa Operativo (B/W Compatible) PDF generado exitosamente.");
 
     } catch (error) {
-        console.error("Error Geográfico:", error);
+        console.error("Error:", error);
         alert(error.message);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
     }
