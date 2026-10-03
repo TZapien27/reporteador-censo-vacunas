@@ -912,7 +912,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 }
 
 // ==========================================
-// 8. REPORTE: MAPA GEOESPACIAL LOCAL (ENCABEZADOS DINÁMICOS Y SIMBOLOGÍA B/W)
+// 8. REPORTE: MAPA GEOESPACIAL LOCAL Y ANEXO DE DOMICILIOS
 // ==========================================
 
 function latLngToPx(lat, lng, zoom) {
@@ -931,70 +931,53 @@ async function cargarTileOSM(url) {
     });
 }
 
-// Subrutinas de Renderizado de Figuras Geométricas
 function drawCanvasShape(ctx, x, y, meta) {
     let r = meta.radius;
     ctx.beginPath();
-    
     if (meta.isOutline) {
-        ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = meta.color; ctx.lineWidth = 2;
+        ctx.fillStyle = "#FFFFFF"; ctx.strokeStyle = meta.color; ctx.lineWidth = 1.5;
     } else {
-        ctx.fillStyle = meta.color; ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 1;
+        ctx.fillStyle = meta.color; ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 0.8;
     }
 
-    if (meta.shape === 'circle') {
-        ctx.arc(x, y, r, 0, 2 * Math.PI);
-    } else if (meta.shape === 'square') {
-        ctx.rect(x - r, y - r, r * 2, r * 2);
-    } else if (meta.shape === 'triangle') {
-        ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r); ctx.lineTo(x - r, y + r); ctx.closePath();
-    } else if (meta.shape === 'triangle-down') {
-        ctx.moveTo(x, y + r); ctx.lineTo(x + r, y - r); ctx.lineTo(x - r, y - r); ctx.closePath();
-    } else if (meta.shape === 'diamond') {
-        ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath();
-    } else if (meta.shape === 'cross') {
+    if (meta.shape === 'circle') ctx.arc(x, y, r, 0, 2 * Math.PI);
+    else if (meta.shape === 'square') ctx.rect(x - r, y - r, r * 2, r * 2);
+    else if (meta.shape === 'triangle') { ctx.moveTo(x, y - r); ctx.lineTo(x + r, y + r); ctx.lineTo(x - r, y + r); ctx.closePath(); }
+    else if (meta.shape === 'triangle-down') { ctx.moveTo(x, y + r); ctx.lineTo(x + r, y - r); ctx.lineTo(x - r, y - r); ctx.closePath(); }
+    else if (meta.shape === 'diamond') { ctx.moveTo(x, y - r); ctx.lineTo(x + r, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r, y); ctx.closePath(); }
+    else if (meta.shape === 'cross') {
         ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
         ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r);
     }
 
-    if (meta.shape === 'cross') {
-        ctx.strokeStyle = meta.color; ctx.lineWidth = 3; ctx.stroke();
-    } else {
-        ctx.fill(); ctx.stroke();
-    }
+    if (meta.shape === 'cross') { ctx.strokeStyle = meta.color; ctx.lineWidth = 2; ctx.stroke(); } 
+    else { ctx.fill(); ctx.stroke(); }
 }
 
 function drawPdfShape(doc, x, y, meta) {
     let r = meta.radius;
-    let style = meta.isOutline ? 'D' : 'FD'; // D = Solo contorno, FD = Relleno y Contorno
+    let style = meta.isOutline ? 'D' : 'FD';
     if (meta.shape === 'cross') style = 'D';
 
     doc.setFillColor(meta.isOutline ? '#FFFFFF' : meta.color);
     doc.setDrawColor(meta.color);
-    doc.setLineWidth(meta.isOutline || meta.shape === 'cross' ? 1.5 : 0.5);
+    doc.setLineWidth(meta.isOutline || meta.shape === 'cross' ? 1 : 0.3);
 
     if (meta.shape === 'circle') doc.circle(x, y, r, style);
     else if (meta.shape === 'square') doc.rect(x - r, y - r, r * 2, r * 2, style);
     else if (meta.shape === 'triangle') doc.triangle(x, y - r, x + r, y + r, x - r, y + r, style);
     else if (meta.shape === 'triangle-down') doc.triangle(x, y + r, x + r, y - r, x - r, y - r, style);
     else if (meta.shape === 'diamond') {
-        doc.triangle(x - r, y, x + r, y, x, y - r, style); // Triángulo superior
-        doc.triangle(x - r, y, x + r, y, x, y + r, style); // Triángulo inferior
+        doc.triangle(x - r, y, x + r, y, x, y - r, style);
+        doc.triangle(x - r, y, x + r, y, x, y + r, style);
     } 
-    else if (meta.shape === 'cross') {
-        doc.line(x - r, y - r, x + r, y + r);
-        doc.line(x + r, y - r, x - r, y + r);
-    }
+    else if (meta.shape === 'cross') { doc.line(x - r, y - r, x + r, y + r); doc.line(x + r, y - r, x - r, y + r); }
 }
 
 async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
-    if (!fecha) {
-        alert("⚠ Selecciona una Fecha Inicial exacta para el mapa.");
-        return;
-    }
-
+    if (!fecha) { alert("⚠ Selecciona una Fecha Inicial exacta."); return; }
     const btn = document.querySelector(".panel-acciones .btn-principal");
-    if (btn) btn.innerText = "Calculando Geometría Vectorial...";
+    if (btn) btn.innerText = "Procesando...";
 
     try {
         const accionesDelDia = datosUnificados.filter(p => normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha);
@@ -1003,45 +986,32 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         let puntos = [];
         let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
 
-        // ==========================================
-        // DICCIONARIO DE SIMBOLOGÍA (B/W COMPATIBLE)
-        // ==========================================
         const evaluarSimbologia = (registro) => {
             let dom = String(buscarDato(registro, "domicilio visitado") || "").toLowerCase().trim();
             let sit = String(buscarDato(registro, "situación familiar") || buscarDato(registro, "situacion familiar") || "").toLowerCase().trim();
-            
             let huboVacuna = false;
+            
             if (registro._historialVacunas) {
                 registro._historialVacunas.forEach(v => {
                     if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) huboVacuna = true;
                 });
             }
             
-            // 1. Vacuna Aplicada (Círculo sólido grande Verde oscuro)
-            if (huboVacuna) return { label: "Vacuna Aplicada", color: "#006400", shape: "circle", isOutline: false, radius: 7 };
-            
-            // 2. Domicilio Visitado
+            // REDUCCIÓN DE ESCALA VECTORIAL (radius 4 y 2.5) para evitar Overlapping
+            if (huboVacuna) return { label: "Vacuna Aplicada", color: "#006400", shape: "circle", isOutline: false, radius: 4 };
             if (dom.includes("baldío") || dom.includes("baldio") || dom.includes("deshabitada")) 
-                return { label: "Deshabitadas / Baldíos", color: "#9E9E9E", shape: "square", isOutline: false, radius: 5 };
-            if (dom.includes("negocio")) 
-                return { label: "Negocio", color: "#800080", shape: "diamond", isOutline: false, radius: 5 };
-
-            // 3. Situación Familiar
-            if (sit.includes("ausente")) return { label: "Fam. Ausente", color: "#FF8C00", shape: "triangle", isOutline: false, radius: 5 };
-            if (sit.includes("renuente")) return { label: "Fam. Renuente", color: "#8B0000", shape: "cross", isOutline: false, radius: 5 };
-            
+                return { label: "Deshabitadas / Baldíos", color: "#9E9E9E", shape: "square", isOutline: false, radius: 2.5 };
+            if (dom.includes("negocio")) return { label: "Negocio", color: "#800080", shape: "diamond", isOutline: false, radius: 2.5 };
+            if (sit.includes("ausente")) return { label: "Fam. Ausente", color: "#FF8C00", shape: "triangle", isOutline: false, radius: 2.5 };
+            if (sit.includes("renuente")) return { label: "Fam. Renuente", color: "#8B0000", shape: "cross", isOutline: false, radius: 2.5 };
             if (sit.includes("con niños") && sit.includes("no se registran")) 
-                return { label: "Con Niños (No Reg.)", color: "#D4AC0D", shape: "triangle-down", isOutline: false, radius: 5 };
-            if (sit.includes("con niños")) 
-                return { label: "Con Niños (Registrados)", color: "#2E86C1", shape: "circle", isOutline: false, radius: 5 };
-            
+                return { label: "Con Niños (No Reg.)", color: "#D4AC0D", shape: "triangle-down", isOutline: false, radius: 2.5 };
+            if (sit.includes("con niños")) return { label: "Con Niños (Registrados)", color: "#2E86C1", shape: "circle", isOutline: false, radius: 2.5 };
             if (sit.includes("sin niños") && (sit.includes("ninguna") || sit.includes("no se registra"))) 
-                return { label: "Sin Niños (Nadie Reg.)", color: "#000000", shape: "square", isOutline: true, radius: 5 };
-            if (sit.includes("sin niños")) 
-                return { label: "Sin Niños (Sí Reg.)", color: "#E74C3C", shape: "circle", isOutline: true, radius: 5 };
+                return { label: "Sin Niños (Nadie Reg.)", color: "#000000", shape: "square", isOutline: true, radius: 2.5 };
+            if (sit.includes("sin niños")) return { label: "Sin Niños (Sí Reg.)", color: "#E74C3C", shape: "circle", isOutline: true, radius: 2.5 };
             
-            // Fallback
-            return { label: "Otro / Indefinido", color: "#333333", shape: "circle", isOutline: true, radius: 4 };
+            return { label: "Otro / Indefinido", color: "#333333", shape: "circle", isOutline: true, radius: 2 };
         };
 
         accionesDelDia.forEach(p => {
@@ -1051,9 +1021,8 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                 if (partes.length >= 2) {
                     let lat = parseFloat(partes[0].replace(/[^0-9.-]/g, ""));
                     let lng = parseFloat(partes[1].replace(/[^0-9.-]/g, ""));
-                    
                     if (!isNaN(lat) && !isNaN(lng)) {
-                        puntos.push({ lat, lng, meta: evaluarSimbologia(p) });
+                        puntos.push({ lat, lng, meta: evaluarSimbologia(p), ref: p });
                         if (lat < minLat) minLat = lat;
                         if (lat > maxLat) maxLat = lat;
                         if (lng < minLng) minLng = lng;
@@ -1072,18 +1041,21 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         while(zoom > 10) {
             minPx = latLngToPx(maxLat, minLng, zoom);
             maxPx = latLngToPx(minLat, maxLng, zoom);
-            if ((maxPx.x - minPx.x) < 700 && (maxPx.y - minPx.y) < 320) break; // Altura reducida para dar espacio al nuevo encabezado
+            // Ajuste estricto del Bounding Box para forzar acercamiento de cámara
+            if ((maxPx.x - minPx.x) < 650 && (maxPx.y - minPx.y) < 280) break; 
             zoom--;
         }
+        // Incremento forzado de acercamiento (si el límite de Esri lo permite)
+        zoom = Math.min(zoom + 1, 19);
 
         const centerPx = latLngToPx((minLat + maxLat) / 2, (minLng + maxLng) / 2, zoom);
-        const mapW = 800; const mapH = 400; // Ajustado para formato apaisado con más margen superior
+        const mapW = 800; const mapH = 400; 
         const tlPx = { x: centerPx.x - mapW/2, y: centerPx.y - mapH/2 }; 
 
         const tMinX = Math.floor(tlPx.x / 256), tMaxX = Math.floor((tlPx.x + mapW) / 256);
         const tMinY = Math.floor(tlPx.y / 256), tMaxY = Math.floor((tlPx.y + mapH) / 256);
 
-        if (btn) btn.innerText = "Descargando Cartografía Base (Esri)...";
+        if (btn) btn.innerText = "Descargando Cartografía...";
         const promesasTiles = [];
         for (let tx = tMinX; tx <= tMaxX; tx++) {
             for (let ty = tMinY; ty <= tMaxY; ty++) {
@@ -1096,8 +1068,8 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         const canvas = document.createElement("canvas");
         canvas.width = mapW; canvas.height = mapH;
         const ctx = canvas.getContext("2d");
-
         ctx.fillStyle = "#e5e3df"; ctx.fillRect(0, 0, mapW, mapH);
+        
         tiles.forEach(t => {
             if(t && t.img) ctx.drawImage(t.img, (t.tx * 256) - tlPx.x, (t.ty * 256) - tlPx.y, 256, 256);
         });
@@ -1109,64 +1081,53 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
 
         const mapaImagenBase64 = canvas.toDataURL("image/png");
 
-        // ==========================================
-        // EXTRACCIÓN DINÁMICA DE ENCABEZADOS (Set)
-        // ==========================================
         if (btn) btn.innerText = "Renderizando PDF...";
-        let ref = accionesDelDia[0]; // Muestra representativa de la jornada
+        let ref = accionesDelDia[0]; 
         let v_inst = buscarDato(ref, "institución que reporta la actividad") || buscarDato(ref, "institución") || "N/A";
         let v_tipo = buscarDato(ref, "tipo de actividad") || "N/A";
         let v_identificador = buscarDato(ref, "identificador") || "N/A";
 
-        // Filtro de arrays únicos
         let arrAgebs = [...new Set(accionesDelDia.map(p => buscarDato(p, "ageb")).filter(Boolean))];
         let v_agebs = arrAgebs.length > 0 ? arrAgebs.join(", ") : "N/A";
         
-        let arrColonias = [...new Set(accionesDelDia.map(p => buscarDato(p, "colonia")).filter(Boolean))];
+        // Limpieza estricta de espacios en blanco (String Trimming) para evitar renderizado fragmentado
+        let arrColonias = [...new Set(accionesDelDia.map(p => {
+            let val = buscarDato(p, "colonia");
+            return val ? String(val).trim() : null;
+        }).filter(Boolean))];
         let v_colonias = arrColonias.length > 0 ? arrColonias.join(", ") : "N/A";
 
-        // ==========================================
-        // INYECCIÓN jsPDF Y MAQUETACIÓN
-        // ==========================================
         const { jsPDF } = window.jspdf;
         const doc = new jsPDF('l', 'pt', 'letter');
         const pW = doc.internal.pageSize.width;
 
+        // PÁGINA 1: MAPA Y LEYENDA
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
         doc.text("MAPA OPERATIVO DE ACCIONES EN TERRENO", pW / 2, 35, { align: 'center' });
         
-        // Bloque de metadatos (Encabezados) a dos columnas
         doc.setFontSize(9); doc.setTextColor(0);
-        
-        // Columna Izquierda
         doc.setFont(undefined, 'bold'); doc.text("Fecha de la actividad:", 40, 55);
         doc.setFont(undefined, 'normal'); doc.text(fecha, 150, 55);
-        
         doc.setFont(undefined, 'bold'); doc.text("Institución que reporta:", 40, 70);
         doc.setFont(undefined, 'normal'); doc.text(v_inst, 150, 70);
-        
         doc.setFont(undefined, 'bold'); doc.text("Tipo de actividad:", 40, 85);
         doc.setFont(undefined, 'normal'); doc.text(v_tipo, 150, 85);
 
-        // Columna Derecha
         doc.setFont(undefined, 'bold'); doc.text("Identificador (AGEB/Módulo):", pW/2, 55);
         doc.setFont(undefined, 'normal'); doc.text(v_identificador, pW/2 + 140, 55);
-        
         doc.setFont(undefined, 'bold'); doc.text("AGEB(s) trabajados:", pW/2, 70);
         doc.setFont(undefined, 'normal'); doc.text(v_agebs, pW/2 + 105, 70);
         
         doc.setFont(undefined, 'bold'); doc.text("Colonia(s):", pW/2, 85);
-        // Función split para evitar que un string muy largo de colonias rompa el margen derecho
-        let colShort = doc.splitTextToSize(v_colonias, pW/2 - 70);
-        doc.setFont(undefined, 'normal'); doc.text(colShort, pW/2 + 55, 85);
+        // Renderizado nativo por matriz de líneas para evitar el colapso del justificado
+        let colLines = doc.splitTextToSize(v_colonias, pW/2 - 70);
+        doc.setFont(undefined, 'normal'); doc.text(colLines, pW/2 + 55, 85);
 
-        // Ajuste vertical del mapa para acomodar el nuevo encabezado
         const yMapStart = 110; 
         let anchoRender = pW - 80;
         let altoRender = mapH * (anchoRender / mapW);
         doc.addImage(mapaImagenBase64, 'PNG', 40, yMapStart, anchoRender, altoRender);
 
-        // Grid de Leyenda de Simbología Geométrica
         let conteos = {};
         puntos.forEach(p => {
             let key = JSON.stringify(p.meta);
@@ -1176,23 +1137,95 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
 
         const yLeyendaInicio = yMapStart + altoRender + 25;
         let col = 0, fila = 0;
-        
         Object.values(conteos).forEach(item => {
             let x = 40 + (col * 240);
             let y = yLeyendaInicio + (fila * 16);
-            
             drawPdfShape(doc, x + 5, y - 3, item.meta);
-            
             doc.setTextColor(0); doc.setFontSize(9); doc.setFont(undefined, 'normal');
             doc.text(`${item.meta.label} (${item.count})`, x + 16, y);
-            
-            col++;
-            if (col > 2) { col = 0; fila++; } 
+            col++; if (col > 2) { col = 0; fila++; } 
         });
 
-        doc.save(`Mapa_Operativo_${fecha}.pdf`);
+        // ==========================================
+        // PÁGINA 2+: ANEXO DE DOMICILIOS VISITADOS
+        // ==========================================
+        doc.addPage();
+        doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
+        doc.text("ANEXO: LISTADO DE DOMICILIOS VISITADOS", pW / 2, 40, { align: 'center' });
+        
+        let yList = 70;
+        
+        // Función auxiliar para dibujar el encabezado de tabla
+        const drawTableHeader = (y) => {
+            doc.setFontSize(9); doc.setTextColor(0); doc.setFont(undefined, 'bold');
+            doc.text("DIRECCIÓN (CALLE, NÚMERO, COLONIA)", 40, y);
+            doc.text("DOMICILIO", 320, y);
+            doc.text("SITUACIÓN FAMILIAR", 450, y);
+            doc.text("VACUNAS (HOY)", 600, y);
+            doc.setDrawColor(0); doc.setLineWidth(1);
+            doc.line(40, y + 5, pW - 40, y + 5);
+            return y + 20;
+        };
+        
+        yList = drawTableHeader(yList);
+
+        doc.setFontSize(8); doc.setFont(undefined, 'normal');
+        accionesDelDia.forEach(p => {
+            // Evaluador de límite de página (Bottom Margin)
+            if (yList > doc.internal.pageSize.height - 40) {
+                doc.addPage();
+                yList = drawTableHeader(40);
+                doc.setFontSize(8); doc.setFont(undefined, 'normal');
+            }
+
+            let calle = buscarDato(p, "calle") || "";
+            let num = buscarDato(p, "número exterior") || buscarDato(p, "numero exterior") || "";
+            let col = buscarDato(p, "colonia") || "";
+            let direccion = `${calle} ${num}, ${col}`.trim();
+            
+            let dom = buscarDato(p, "domicilio visitado") || "S/D";
+            let sit = buscarDato(p, "situación familiar") || buscarDato(p, "situacion familiar") || "S/D";
+            
+            let vacs = [];
+            if (p._historialVacunas) {
+                p._historialVacunas.forEach(v => {
+                    if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) {
+                        vacs.push(String(buscarDato(v, "biologico") || buscarDato(v, "biológico") || "").trim());
+                    }
+                });
+            }
+            let vacsStr = vacs.length > 0 ? vacs.join(", ") : "Ninguna";
+
+            // Envoltura de texto en columnas restrictivas (Word-wrap)
+            let dirLines = doc.splitTextToSize(direccion, 260);
+            let domLines = doc.splitTextToSize(dom, 110);
+            let sitLines = doc.splitTextToSize(sit, 130);
+            let vacsLines = doc.splitTextToSize(vacsStr, 150);
+
+            // Determinar altura del bloque basada en el texto más largo
+            let maxLines = Math.max(dirLines.length, domLines.length, sitLines.length, vacsLines.length);
+
+            // Inyección de celdas
+            doc.setTextColor(0);
+            doc.text(dirLines, 40, yList);
+            doc.text(domLines, 320, yList);
+            doc.text(sitLines, 450, yList);
+            
+            // Regla de Negocio: Vacunas en rojo
+            if (vacs.length > 0) doc.setTextColor(200, 0, 0); 
+            doc.text(vacsLines, 600, yList);
+
+            yList += (maxLines * 10) + 5;
+            
+            // Separador de registros
+            doc.setDrawColor(200); doc.setLineWidth(0.5);
+            doc.line(40, yList - 3, pW - 40, yList - 3);
+            yList += 8;
+        });
+
+        doc.save(`Mapa_Operativo_y_Anexo_${fecha}.pdf`);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
-        alert("✅ Mapa Operativo (B/W Compatible) PDF generado exitosamente.");
+        alert("✅ Mapa y Listado de Domicilios generados exitosamente.");
 
     } catch (error) {
         console.error("Error:", error);
