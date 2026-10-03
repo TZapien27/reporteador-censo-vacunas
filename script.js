@@ -953,8 +953,8 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         // DICCIONARIO DE SIMBOLOGÍA (Reglas de Negocio)
         // ==========================================
         const evaluarSimbologia = (registro) => {
-            // ⚠️ CAMBIA "estatus_vivienda" por el nombre de tu columna en AppSheet ⚠️
-            let est = String(buscarDato(registro, "Situación familiar") || "").toLowerCase();
+            // Aplicamos .trim() para limpiar espacios ocultos. Si la celda está vacía, será ""
+            let est = String(buscarDato(registro, "estatus_vivienda") || "").toLowerCase().trim();
             
             let huboVacuna = false;
             if (registro._historialVacunas) {
@@ -963,25 +963,32 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                 });
             }
             
-            if (huboVacuna) return { label: "Vacuna Aplicada", color: "#FF0000", radius: 7 }; // Rojo Grande
+            // 1. Prioridad Absoluta: Vacuna aplicada hoy (VERDE, pin grande)
+            if (huboVacuna) return { label: "Vacuna Aplicada", color: "#008000", radius: 7 }; 
             
+            // 2. Control de Nulos/Vacíos y Agrupación de Baldíos
+            if (est === "" || est.includes("deshabitada") || est.includes("baldío") || est.includes("baldio")) {
+                return { label: "Deshabitadas / Baldíos", color: "#9E9E9E", radius: 5 }; // Gris
+            }
+
+            // 3. Resto de la lógica de visitas
             if (est.includes("ausente")) return { label: "Fam. Ausente", color: "#FF8C00", radius: 5 }; // Naranja
             if (est.includes("renuente")) return { label: "Fam. Renuente", color: "#8B0000", radius: 5 }; // Rojo Oscuro
-            if (est.includes("deshabitada")) return { label: "Deshabitada", color: "#9E9E9E", radius: 5 }; // Gris
-            if (est.includes("baldío") || est.includes("baldio")) return { label: "Lote Baldío", color: "#8B4513", radius: 5 }; // Marrón
             if (est.includes("negocio")) return { label: "Negocio", color: "#800080", radius: 5 }; // Morado
             
             if (est.includes("con niños")) {
                 if (est.includes("no se registran")) return { label: "Con Niños (No Reg.)", color: "#FFEB3B", radius: 5 }; // Amarillo
-                return { label: "Con Niños (Registrados)", color: "#4CAF50", radius: 5 }; // Verde
+                // Usamos un tono verde distinto (#4CAF50) para no confundirlo con la vacuna
+                return { label: "Con Niños (Registrados)", color: "#4CAF50", radius: 5 }; 
             }
             if (est.includes("sin niños")) {
                 if (est.includes("pero se registra")) return { label: "Sin Niños (Sí Reg.)", color: "#03A9F4", radius: 5 }; // Azul Claro
                 return { label: "Sin Niños (Nadie Reg.)", color: "#000000", radius: 5 }; // Negro
             }
-            return { label: "Otro / Visita", color: "#00008B", radius: 4 }; 
+            
+            // Fallback de seguridad por si escriben algún texto fuera de catálogo
+            return { label: "Otro / Visita", color: "#00008B", radius: 4 }; // Azul Marino
         };
-
         accionesDelDia.forEach(p => {
             let latlong = buscarDato(p, "ubicacion") || buscarDato(p, "coordenadas"); 
             if (latlong && String(latlong).includes(",")) {
@@ -1034,7 +1041,8 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         const promesasTiles = [];
         for (let tx = tMinX; tx <= tMaxX; tx++) {
             for (let ty = tMinY; ty <= tMaxY; ty++) {
-                let url = `https://tile.openstreetmap.org/${zoom}/${tx}/${ty}.png`;
+                // Reemplazamos OSM por el servidor público de CartoCDN
+                let url = `https://a.basemaps.cartocdn.com/light_all/${zoom}/${tx}/${ty}.png`;
                 promesasTiles.push(cargarTileOSM(url).then(img => ({ img, tx, ty })));
             }
         }
