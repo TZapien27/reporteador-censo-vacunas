@@ -286,11 +286,20 @@ async function ejecutarGeneracionPorFiltros() {
             _historialVacunas: vacunasSeguras.filter(v => buscarDato(v, "id_paciente") == buscarDato(p, "id")) 
         }));
 
+        // ==========================================
+        // CAPTURA DEL NUEVO FILTRO (Identificador)
+        // ==========================================
+        // Se valida si el elemento existe en el DOM para no romper los otros reportes
+        let inputIdentificador = document.getElementById("identificadorReporte");
+        let idActivo = inputIdentificador ? inputIdentificador.value : "";
+
         // 5. LLAMADA A RENDERIZADO
         if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
         else if (tipoRep === "informe") generarInformeActividad(datosUnificados, fInit, fEnd);
         else if (tipoRep === "bloqueo") generarAccionesBloqueo(datosUnificados, fInit, fEnd);
-        else if (tipoRep === "mapa_diario") generarMapaDiarioEnPDF(datosUnificados, fInit);        // Restaurar estado del botón si todo fue un éxito
+        else if (tipoRep === "mapa_diario") generarMapaDiarioEnPDF(datosUnificados, fInit, idActivo); // <-- INYECCIÓN DEL 3ER PARÁMETRO
+        
+        // Restaurar estado del botón si todo fue un éxito
         btn.innerText = "Generar Reporte Seleccionado";
 
     } catch (error) {
@@ -912,7 +921,7 @@ function generarAccionesBloqueo(unificados, fInit, fEnd) {
 }
 
 // ==========================================
-// 8. REPORTE: MAPA GEOESPACIAL LOCAL Y ANEXO DE DOMICILIOS
+// 8. REPORTE: BITÁCORA DIARIA, MAPA GEOESPACIAL Y ANEXO
 // ==========================================
 
 function latLngToPx(lat, lng, zoom) {
@@ -974,14 +983,24 @@ function drawPdfShape(doc, x, y, meta) {
     else if (meta.shape === 'cross') { doc.line(x - r, y - r, x + r, y + r); doc.line(x + r, y - r, x - r, y + r); }
 }
 
-async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
-    if (!fecha) { alert("⚠ Selecciona una Fecha Inicial exacta."); return; }
+// NUEVA FIRMA: Recibe Fecha + Identificador
+async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSeleccionado) {
+    if (!fecha || !identificadorSeleccionado) { 
+        alert("⚠ Selecciona la Fecha y el Identificador de la actividad."); 
+        return; 
+    }
     const btn = document.querySelector(".panel-acciones .btn-principal");
-    if (btn) btn.innerText = "Procesando...";
+    if (btn) btn.innerText = "Procesando Bitácora...";
 
     try {
-        const accionesDelDia = datosUnificados.filter(p => normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha);
-        if (accionesDelDia.length === 0) throw new Error("No hay acciones para esta fecha.");
+        // FILTRO COMPUESTO ESTRICTO (Fecha && Identificador)
+        const accionesDelDia = datosUnificados.filter(p => {
+            let matchFecha = normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha;
+            let matchId = String(buscarDato(p, "identificador") || "").trim() === String(identificadorSeleccionado).trim();
+            return matchFecha && matchId;
+        });
+
+        if (accionesDelDia.length === 0) throw new Error("No hay acciones para esta fecha y ese identificador.");
 
         let puntos = [];
         let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
@@ -997,7 +1016,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
                 });
             }
             
-            // REDUCCIÓN DE ESCALA VECTORIAL (radius 4 y 2.5) para evitar Overlapping
+            // SIMBOLOGÍA REDUCIDA
             if (huboVacuna) return { label: "Vacuna Aplicada", color: "#006400", shape: "circle", isOutline: false, radius: 4 };
             if (dom.includes("baldío") || dom.includes("baldio") || dom.includes("deshabitada")) 
                 return { label: "Deshabitadas / Baldíos", color: "#9E9E9E", shape: "square", isOutline: false, radius: 2.5 };
@@ -1041,15 +1060,13 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         while(zoom > 10) {
             minPx = latLngToPx(maxLat, minLng, zoom);
             maxPx = latLngToPx(minLat, maxLng, zoom);
-            // Ajuste estricto del Bounding Box para forzar acercamiento de cámara
             if ((maxPx.x - minPx.x) < 650 && (maxPx.y - minPx.y) < 280) break; 
             zoom--;
         }
-        // Incremento forzado de acercamiento (si el límite de Esri lo permite)
         zoom = Math.min(zoom + 1, 19);
 
         const centerPx = latLngToPx((minLat + maxLat) / 2, (minLng + maxLng) / 2, zoom);
-        const mapW = 800; const mapH = 400; 
+        const mapW = 800; const mapH = 380; // Altura ajustada para el nuevo encabezado
         const tlPx = { x: centerPx.x - mapW/2, y: centerPx.y - mapH/2 }; 
 
         const tMinX = Math.floor(tlPx.x / 256), tMaxX = Math.floor((tlPx.x + mapW) / 256);
@@ -1081,16 +1098,22 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
 
         const mapaImagenBase64 = canvas.toDataURL("image/png");
 
-        if (btn) btn.innerText = "Renderizando PDF...";
+        if (btn) btn.innerText = "Renderizando Reporte...";
         let ref = accionesDelDia[0]; 
+        
+        // EXTRACCIÓN DE NUEVOS METADATOS (ENCABEZADO EXTENDIDO)
         let v_inst = buscarDato(ref, "institución que reporta la actividad") || buscarDato(ref, "institución") || "N/A";
         let v_tipo = buscarDato(ref, "tipo de actividad") || "N/A";
         let v_identificador = buscarDato(ref, "identificador") || "N/A";
+        
+        let v_vac1 = buscarDato(ref, "nombre de vacunador") || "N/A";
+        let v_vac2 = buscarDato(ref, "nombre de vacunador / responsable 2") || "N/A";
+        let v_reg_nombre = buscarDato(ref, "registrador_nombre") || "N/A";
+        let v_reg_inst = buscarDato(ref, "registrador_institucion") || "N/A";
 
         let arrAgebs = [...new Set(accionesDelDia.map(p => buscarDato(p, "ageb")).filter(Boolean))];
         let v_agebs = arrAgebs.length > 0 ? arrAgebs.join(", ") : "N/A";
         
-        // Limpieza estricta de espacios en blanco (String Trimming) para evitar renderizado fragmentado
         let arrColonias = [...new Set(accionesDelDia.map(p => {
             let val = buscarDato(p, "colonia");
             return val ? String(val).trim() : null;
@@ -1101,29 +1124,43 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         const doc = new jsPDF('l', 'pt', 'letter');
         const pW = doc.internal.pageSize.width;
 
-        // PÁGINA 1: MAPA Y LEYENDA
+        // ==========================================
+        // PÁGINA 1: MAPA Y LEYENDA (CON ENCABEZADO NUEVO)
+        // ==========================================
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
-        doc.text("MAPA OPERATIVO DE ACCIONES EN TERRENO", pW / 2, 35, { align: 'center' });
+        doc.text("BITÁCORA DIARIA DE ACCIONES EN TERRENO", pW / 2, 30, { align: 'center' });
         
         doc.setFontSize(9); doc.setTextColor(0);
-        doc.setFont(undefined, 'bold'); doc.text("Fecha de la actividad:", 40, 55);
-        doc.setFont(undefined, 'normal'); doc.text(fecha, 150, 55);
-        doc.setFont(undefined, 'bold'); doc.text("Institución que reporta:", 40, 70);
-        doc.setFont(undefined, 'normal'); doc.text(v_inst, 150, 70);
-        doc.setFont(undefined, 'bold'); doc.text("Tipo de actividad:", 40, 85);
-        doc.setFont(undefined, 'normal'); doc.text(v_tipo, 150, 85);
-
-        doc.setFont(undefined, 'bold'); doc.text("Identificador (AGEB/Módulo):", pW/2, 55);
-        doc.setFont(undefined, 'normal'); doc.text(v_identificador, pW/2 + 140, 55);
-        doc.setFont(undefined, 'bold'); doc.text("AGEB(s) trabajados:", pW/2, 70);
-        doc.setFont(undefined, 'normal'); doc.text(v_agebs, pW/2 + 105, 70);
         
-        doc.setFont(undefined, 'bold'); doc.text("Colonia(s):", pW/2, 85);
-        // Renderizado nativo por matriz de líneas para evitar el colapso del justificado
-        let colLines = doc.splitTextToSize(v_colonias, pW/2 - 70);
-        doc.setFont(undefined, 'normal'); doc.text(colLines, pW/2 + 55, 85);
+        // Columna Izquierda (Encabezados extendidos)
+        doc.setFont(undefined, 'bold'); doc.text("Fecha de la actividad:", 40, 50);
+        doc.setFont(undefined, 'normal'); doc.text(fecha, 150, 50);
+        doc.setFont(undefined, 'bold'); doc.text("Institución que reporta:", 40, 65);
+        doc.setFont(undefined, 'normal'); doc.text(v_inst, 150, 65);
+        doc.setFont(undefined, 'bold'); doc.text("Tipo de actividad:", 40, 80);
+        doc.setFont(undefined, 'normal'); doc.text(v_tipo, 150, 80);
+        doc.setFont(undefined, 'bold'); doc.text("Vacunador 1:", 40, 95);
+        doc.setFont(undefined, 'normal'); doc.text(v_vac1, 150, 95);
+        doc.setFont(undefined, 'bold'); doc.text("Vacunador 2:", 40, 110);
+        doc.setFont(undefined, 'normal'); doc.text(v_vac2, 150, 110);
 
-        const yMapStart = 110; 
+        // Columna Derecha (Encabezados extendidos)
+        doc.setFont(undefined, 'bold'); doc.text("Identificador (AGEB/Módulo):", pW/2, 50);
+        doc.setFont(undefined, 'normal'); doc.text(v_identificador, pW/2 + 140, 50);
+        doc.setFont(undefined, 'bold'); doc.text("AGEB(s) trabajados:", pW/2, 65);
+        doc.setFont(undefined, 'normal'); doc.text(v_agebs, pW/2 + 105, 65);
+        doc.setFont(undefined, 'bold'); doc.text("Colonia(s):", pW/2, 80);
+        let colLines = doc.splitTextToSize(v_colonias, pW/2 - 70);
+        doc.setFont(undefined, 'normal'); doc.text(colLines, pW/2 + 55, 80);
+        
+        // El salto de línea de la colonia puede empujar lo siguiente, se reajusta Y
+        let yDescOffset = 80 + (colLines.length * 10);
+        doc.setFont(undefined, 'bold'); doc.text("Registrador:", pW/2, yDescOffset);
+        doc.setFont(undefined, 'normal'); doc.text(v_reg_nombre, pW/2 + 70, yDescOffset);
+        doc.setFont(undefined, 'bold'); doc.text("Inst. del Registrador:", pW/2, yDescOffset + 15);
+        doc.setFont(undefined, 'normal'); doc.text(v_reg_inst, pW/2 + 105, yDescOffset + 15);
+
+        const yMapStart = 135; 
         let anchoRender = pW - 80;
         let altoRender = mapH * (anchoRender / mapW);
         doc.addImage(mapaImagenBase64, 'PNG', 40, yMapStart, anchoRender, altoRender);
@@ -1147,15 +1184,40 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         });
 
         // ==========================================
-        // PÁGINA 2+: ANEXO DE DOMICILIOS VISITADOS
+        // PÁGINA 2+: ANEXO, BIFURCACIÓN Y TOTALES
         // ==========================================
+        
+        let conVacuna = [];
+        let sinVacuna = [];
+        let totalDosisGral = 0;
+        let conteoBiologicos = {}; // Diccionario para desglosar vacunas por tipo
+
+        accionesDelDia.forEach(p => {
+            let tieneVacunaHoy = false;
+            if (p._historialVacunas) {
+                p._historialVacunas.forEach(v => {
+                    if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) {
+                        tieneVacunaHoy = true;
+                        totalDosisGral++; 
+                        
+                        let nombreVac = String(buscarDato(v, "biologico") || buscarDato(v, "biológico") || "Desconocida").trim();
+                        conteoBiologicos[nombreVac] = (conteoBiologicos[nombreVac] || 0) + 1;
+                    }
+                });
+            }
+            if (tieneVacunaHoy) conVacuna.push(p);
+            else sinVacuna.push(p);
+        });
+
+        // Fusiona arreglos asegurando que los vacunados salgan primero
+        let accionesOrdenadas = [...conVacuna, ...sinVacuna];
+
         doc.addPage();
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
         doc.text("ANEXO: LISTADO DE DOMICILIOS VISITADOS", pW / 2, 40, { align: 'center' });
         
         let yList = 70;
         
-        // Función auxiliar para dibujar el encabezado de tabla
         const drawTableHeader = (y) => {
             doc.setFontSize(9); doc.setTextColor(0); doc.setFont(undefined, 'bold');
             doc.text("DIRECCIÓN (CALLE, NÚMERO, COLONIA)", 40, y);
@@ -1168,21 +1230,19 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
         };
         
         yList = drawTableHeader(yList);
-
         doc.setFontSize(8); doc.setFont(undefined, 'normal');
-        accionesDelDia.forEach(p => {
-            // Evaluador de límite de página (Bottom Margin)
+        
+        accionesOrdenadas.forEach(p => {
             if (yList > doc.internal.pageSize.height - 40) {
                 doc.addPage();
                 yList = drawTableHeader(40);
                 doc.setFontSize(8); doc.setFont(undefined, 'normal');
             }
 
+            // Mapeo unificado de dirección sin encadenar
             let dirBruta = buscarDato(p, "dirección") || buscarDato(p, "direccion") || "S/D";
-            let col = buscarDato(p, "colonia") || "";
-            
-            // Operador ternario para evitar comas huérfanas si la colonia viene en blanco
-            let direccion = col ? `${String(dirBruta).trim()}, ${String(col).trim()}` : String(dirBruta).trim();
+            let colName = buscarDato(p, "colonia") || "";
+            let direccion = colName ? `${String(dirBruta).trim()}, ${String(colName).trim()}` : String(dirBruta).trim();
 
             let dom = buscarDato(p, "domicilio visitado") || "S/D";
             let sit = buscarDato(p, "situación familiar") || buscarDato(p, "situacion familiar") || "S/D";
@@ -1197,36 +1257,73 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha) {
             }
             let vacsStr = vacs.length > 0 ? vacs.join(", ") : "Ninguna";
 
-            // Envoltura de texto en columnas restrictivas (Word-wrap)
             let dirLines = doc.splitTextToSize(direccion, 260);
             let domLines = doc.splitTextToSize(dom, 110);
             let sitLines = doc.splitTextToSize(sit, 130);
             let vacsLines = doc.splitTextToSize(vacsStr, 150);
 
-            // Determinar altura del bloque basada en el texto más largo
             let maxLines = Math.max(dirLines.length, domLines.length, sitLines.length, vacsLines.length);
 
-            // Inyección de celdas
             doc.setTextColor(0);
             doc.text(dirLines, 40, yList);
             doc.text(domLines, 320, yList);
             doc.text(sitLines, 450, yList);
             
-            // Regla de Negocio: Vacunas en rojo
             if (vacs.length > 0) doc.setTextColor(200, 0, 0); 
             doc.text(vacsLines, 600, yList);
 
             yList += (maxLines * 10) + 5;
             
-            // Separador de registros
             doc.setDrawColor(200); doc.setLineWidth(0.5);
             doc.line(40, yList - 3, pW - 40, yList - 3);
             yList += 8;
         });
 
-        doc.save(`Mapa_Operativo_y_Anexo_${fecha}.pdf`);
+        // ==========================================
+        // RESUMEN ESTADÍSTICO (DESGLOSE DE VACUNAS)
+        // ==========================================
+        
+        if (yList > doc.internal.pageSize.height - 120) {
+            doc.addPage();
+            yList = 40;
+        }
+
+        yList += 15;
+        doc.setDrawColor(0); doc.setLineWidth(1.5);
+        doc.line(40, yList, pW - 40, yList);
+        yList += 15;
+        
+        doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(0);
+        doc.text("RESUMEN ESTADÍSTICO DE LA JORNADA", pW / 2, yList, { align: 'center' });
+        
+        yList += 20;
+        doc.setFontSize(9);
+        doc.text(`Total Domicilios Visitados: ${accionesOrdenadas.length}`, 40, yList);
+        doc.text(`Domicilios con Vacunación: ${conVacuna.length}`, 260, yList);
+        doc.text(`Domicilios sin Vacunación: ${sinVacuna.length}`, 480, yList);
+        
+        yList += 20;
+        doc.setTextColor(200, 0, 0);
+        doc.setFont(undefined, 'bold');
+        doc.text(`Total Dosis Aplicadas: ${totalDosisGral}`, 40, yList);
+        
+        let xDesglose = 200;
+        let yDesglose = yList;
+        doc.setFont(undefined, 'normal');
+        
+        if(Object.keys(conteoBiologicos).length > 0) {
+            Object.entries(conteoBiologicos).forEach(([vacuna, cantidad]) => {
+                let texto = `- ${vacuna}: ${cantidad} dosis`;
+                doc.text(texto, xDesglose, yDesglose);
+                yDesglose += 12;
+            });
+        } else {
+            doc.text("Ninguna vacuna aplicada en esta jornada.", xDesglose, yDesglose);
+        }
+
+        doc.save(`Bitacora_Terreno_${fecha}_${identificadorSeleccionado}.pdf`);
         if (btn) btn.innerText = "Generar Reporte Seleccionado";
-        alert("✅ Mapa y Listado de Domicilios generados exitosamente.");
+        alert("✅ Bitácora, Mapa y Desglose generados exitosamente.");
 
     } catch (error) {
         console.error("Error:", error);

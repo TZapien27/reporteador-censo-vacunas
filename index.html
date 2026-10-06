@@ -77,14 +77,14 @@
                     <option value="">-- Seleccione un Caso --</option>
                 </select>
             </div>
-                        <div class="filtro-grupo">
-                <label>Fecha Inicial / Única</label>
-                <input type="date" id="filtro-fecha-inicio">
+            <div class="grupo-filtro">
+                <label for="fechaReporte">Fecha de la actividad:</label>
+                <input type="date" id="fechaReporte" class="input-control">
             </div>
-            <div class="filtro-grupo">
-                <label>Fecha Final (Opcional para Rangos)</label>
-                <input type="date" id="filtro-fecha-fin">
-            </div>
+            <div class="grupo-filtro">
+                <label for="identificadorReporte">Identificador (AGEB/Módulo):</label>
+                <input type="text" id="identificadorReporte" class="input-control" placeholder="Ej. 011225-Barr-SSA-Lomas">
+            </div>            
             <div class="panel-acciones">
                 <button class="btn-principal" onclick="ejecutarGeneracionPorFiltros()">Generar Reporte Seleccionado</button>
             </div>
