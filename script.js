@@ -287,54 +287,25 @@ async function ejecutarGeneracionPorFiltros() {
         }));
 
         // ==========================================
-        // 1. LECTURA SEGURA DEL DOM (Evita el error 'null')
+        // CAPTURA DEL NUEVO FILTRO (Identificador)
         // ==========================================
-        // Usamos variables intermedias. Si el elemento no existe, se asigna "" en lugar de lanzar error.
-        const inputFecha = document.getElementById("fechaReporte"); // Cambia el ID si en tu HTML se llama diferente
-        const fInit = inputFecha ? inputFecha.value : "";
+        // Se valida si el elemento existe en el DOM para no romper los otros reportes
+        let inputIdentificador = document.getElementById("identificadorReporte");
+        let idActivo = inputIdentificador ? inputIdentificador.value : "";
 
-        // Captura segura del nuevo filtro
-        const inputIdentificador = document.getElementById("identificadorReporte");
-        const idActivo = inputIdentificador ? inputIdentificador.value : "";
+        // 5. LLAMADA A RENDERIZADO
+        if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
+        else if (tipoRep === "informe") generarInformeActividad(datosUnificados, fInit, fEnd);
+        else if (tipoRep === "bloqueo") generarAccionesBloqueo(datosUnificados, fInit, fEnd);
+        else if (tipoRep === "mapa_diario") generarMapaDiarioEnPDF(datosUnificados, fInit, idActivo); // <-- INYECCIÓN DEL 3ER PARÁMETRO
+        
+        // Restaurar estado del botón si todo fue un éxito
+        btn.innerText = "Generar Reporte Seleccionado";
 
-        // Si tienes fecha final, haz lo mismo:
-        // const inputFEnd = document.getElementById("fechaFinReporte");
-        // const fEnd = inputFEnd ? inputFEnd.value : "";
-
-        // ==========================================
-        // 2. VALIDACIÓN DE CASCADA POR TIPO DE REPORTE
-        // ==========================================
-        if (!fInit) {
-            alert("⚠️ Debes seleccionar una fecha de inicio.");
-            btn.innerText = "Generar Reporte Seleccionado"; // Restaura tu botón
-            return;
-        }
-
-        // Validación estricta EXCLUSIVA para el Mapa/Bitácora
-        if (tipoRep === "mapa_diario" && (!idActivo || idActivo.trim() === "")) {
-            alert("⚠️ Para la Bitácora Diaria es obligatorio ingresar el Identificador (AGEB/Módulo).");
-            btn.innerText = "Generar Reporte Seleccionado"; 
-            return;
-        }
-
-        // ==========================================
-        // 3. ENRUTADOR PRINCIPAL (DISPATCHER)
-        // ==========================================
-        if (tipoRep === "censo") {
-            generarAnexosCenso(datosUnificados, fInit, fEnd);
-        } 
-        else if (tipoRep === "informe") {
-            generarInformeActividad(datosUnificados, fInit, fEnd);
-        } 
-        else if (tipoRep === "bloqueo") {
-            generarAccionesBloqueo(datosUnificados, fInit, fEnd);
-        } 
-        else if (tipoRep === "mapa_diario") {
-            // Aquí inyectamos de forma segura el 3er parámetro que acabamos de validar
-            generarMapaDiarioEnPDF(datosUnificados, fInit, idActivo); 
-        }
-
-        // Restaurar estado del botón si el proceso es síncrono (si es asíncrono, se restaura dentro de cada función)
+    } catch (error) {
+        // 6. MANEJO DEL ERROR: Informa al usuario y libera la interfaz
+        console.error("Fallo crítico detectado en el hilo de ejecución:", error);
+        alert("Ocurrió un error durante el procesamiento:\n" + error.message);
         btn.innerText = "Generar Reporte Seleccionado";
     }
 }
