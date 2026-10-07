@@ -7,37 +7,46 @@ const USUARIOS_SISTEMA = [
 ];
 
 // ==========================================
-// 1. AUTO-RELLENADO DINÁMICO (SCOPE GLOBAL)
+// 1. AUTO-RELLENADO DINÁMICO (ADAPTADO A LA ARQUITECTURA ASÍNCRONA)
 // ==========================================
-// Esto debe vivir libre en el archivo, no dentro de una función de botón.
 document.addEventListener("DOMContentLoaded", () => {
-    const inputFecha = document.getElementById("fechaReporte");
+    // Busca el ID del input de fecha (soporta ambos nombres por seguridad)
+    const inputFecha = document.getElementById("filtro-fecha-inicio") || document.getElementById("fechaReporte");
     const selectIdentificador = document.getElementById("identificadorReporte");
 
     if (inputFecha && selectIdentificador) {
-        inputFecha.addEventListener("change", () => {
-            // Validamos que los datos ya hayan sido descargados en el login
-            if (typeof datosUnificados === 'undefined' || !datosUnificados || datosUnificados.length === 0) {
-                console.warn("La base de datos aún no se ha cargado.");
-                selectIdentificador.innerHTML = '<option value="">Inicia sesión para cargar datos</option>';
-                return;
-            }
-
+        // Se declara la función flecha como asíncrona (async) para permitir llamadas a la BD
+        inputFecha.addEventListener("change", async () => {
             const fechaElegida = inputFecha.value;
-            selectIdentificador.innerHTML = '<option value="">Cargando identificadores...</option>';
             
             if (!fechaElegida) {
                 selectIdentificador.innerHTML = '<option value="">Selecciona primero una fecha...</option>';
                 return;
             }
 
+            // Mensaje de espera mientras se obtienen los datos
+            selectIdentificador.innerHTML = '<option value="">Cargando identificadores...</option>';
+
             try {
-                // Extracción relacional segura
-                const registrosFecha = datosUnificados.filter(p => {
+                // 1. CONEXIÓN A LA BASE DE DATOS (Usando tu propia función)
+                const datosBD = await obtenerDatosDesdeGoogle();
+                
+                // Validación estricta apuntando al nodo 'censo' de tu JSON
+                if (!datosBD || !datosBD.censo || datosBD.censo.length === 0) {
+                    console.warn("La base de datos (Censo) no está disponible o está vacía.");
+                    selectIdentificador.innerHTML = '<option value="">Inicia sesión para cargar datos</option>';
+                    return;
+                }
+
+                // 2. EXTRACCIÓN Y FILTRADO
+                const censoSeguro = datosBD.censo;
+                
+                const registrosFecha = censoSeguro.filter(p => {
                     let fActividad = buscarDato(p, "fecha de la actividad");
                     return fActividad ? normalizarFecha(fActividad) === fechaElegida : false;
                 });
                 
+                // Creación de un arreglo único (Set) con los identificadores encontrados ese día
                 const identificadoresUnicos = [...new Set(registrosFecha.map(p => buscarDato(p, "identificador")).filter(Boolean))];
 
                 if (identificadoresUnicos.length === 0) {
@@ -45,7 +54,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     return;
                 }
 
-                // Población del select
+                // 3. POBLACIÓN DEL DOM (Inyección de etiquetas <option>)
                 selectIdentificador.innerHTML = '<option value="">Seleccione el Identificador...</option>';
                 identificadoresUnicos.forEach(id => {
                     const opt = document.createElement("option");
@@ -53,9 +62,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     opt.textContent = id;
                     selectIdentificador.appendChild(opt);
                 });
+                
             } catch (error) {
-                console.error("Error lógico:", error);
-                selectIdentificador.innerHTML = '<option value="">Error interno</option>';
+                console.error("Error al obtener los datos para el select:", error);
+                selectIdentificador.innerHTML = '<option value="">Error interno al cargar</option>';
             }
         });
     }
