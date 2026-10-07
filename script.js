@@ -1240,7 +1240,6 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
         });
 
         let accionesOrdenadas = [...conVacuna, ...sinVacuna];
-        let accionesOrdenadas = [...conVacuna, ...sinVacuna]; // Agrupamos: Vacunados primero
 
         doc.addPage();
         doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
