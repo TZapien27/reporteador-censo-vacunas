@@ -305,24 +305,59 @@ async function ejecutarGeneracionPorFiltros() {
         // const tipoRep = document.getElementById("tipoReporte").value;
 
         // ==========================================
-        // 5. LLAMADA A RENDERIZADO (El bloque que enviaste, corregido)
+        // AUTO-RELLENADO DINÁMICO DEL IDENTIFICADOR (VERSIÓN SEGURA / FAIL-SAFE)
         // ==========================================
-        if (tipoRep === "censo") {
-            generarAnexosCenso(datosUnificados, fInit, fEnd);
-        } 
-        else if (tipoRep === "informe") {
-            generarInformeActividad(datosUnificados, fInit, fEnd);
-        } 
-        else if (tipoRep === "bloqueo") {
-            generarAccionesBloqueo(datosUnificados, fInit, fEnd);
-        } 
-        else if (tipoRep === "mapa_diario") {
-            // AQUÍ ESTÁ LA CLAVE: Ahora enviamos explícitamente los 3 parámetros requeridos
-            generarMapaDiarioEnPDF(datosUnificados, fInit, idActivo); 
-        }
+        // El evento DOMContentLoaded garantiza que esto no bloquee el login ni la carga inicial
+        document.addEventListener("DOMContentLoaded", () => {
+            const inputFecha = document.getElementById("fechaReporte");
+            const selectIdentificador = document.getElementById("identificadorReporte");
 
-        // Restaurar estado del botón si todo fue un éxito
-        btn.innerText = "Generar Reporte Seleccionado";
+            if (inputFecha && selectIdentificador) {
+                inputFecha.addEventListener("change", () => {
+                    // 1. VALIDACIÓN ESTRICTA DE ESTADO: Evita que el script truene si no hay login
+                    if (typeof datosUnificados === 'undefined' || !datosUnificados || datosUnificados.length === 0) {
+                        console.warn("La base de datos aún no se ha cargado. Por favor inicia sesión primero.");
+                        selectIdentificador.innerHTML = '<option value="">Inicia sesión para cargar datos</option>';
+                        return;
+                    }
+
+                    const fechaElegida = inputFecha.value;
+                    selectIdentificador.innerHTML = '<option value="">Cargando identificadores...</option>';
+                    
+                    if (!fechaElegida) {
+                        selectIdentificador.innerHTML = '<option value="">Selecciona primero una fecha...</option>';
+                        return;
+                    }
+
+                    try {
+                        // 2. EXTRACCIÓN SEGURA
+                        const registrosFecha = datosUnificados.filter(p => {
+                            let fActividad = buscarDato(p, "fecha de la actividad");
+                            return fActividad ? normalizarFecha(fActividad) === fechaElegida : false;
+                        });
+                        
+                        const identificadoresUnicos = [...new Set(registrosFecha.map(p => buscarDato(p, "identificador")).filter(Boolean))];
+
+                        if (identificadoresUnicos.length === 0) {
+                            selectIdentificador.innerHTML = '<option value="">No hubo actividades en esta fecha</option>';
+                            return;
+                        }
+
+                        // 3. POBLACIÓN DEL DOM
+                        selectIdentificador.innerHTML = '<option value="">Seleccione el Identificador...</option>';
+                        identificadoresUnicos.forEach(id => {
+                            const opt = document.createElement("option");
+                            opt.value = id;
+                            opt.textContent = id;
+                            selectIdentificador.appendChild(opt);
+                        });
+                    } catch (error) {
+                        console.error("Error lógico en el filtrado de identificadores:", error);
+                        selectIdentificador.innerHTML = '<option value="">Error interno</option>';
+                    }
+                });
+            }
+        });
 
     } catch (error) {
         // 6. MANEJO DEL ERROR: Informa al usuario y libera la interfaz
