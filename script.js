@@ -7,54 +7,50 @@ const USUARIOS_SISTEMA = [
 ];
 
 // ==========================================
-// 1. AUTO-RELLENADO DINÁMICO (ADAPTADO A LA ARQUITECTURA ASÍNCRONA)
+// 1. AUTO-RELLENADO DINÁMICO (Con claves y formatos exactos)
 // ==========================================
 document.addEventListener("DOMContentLoaded", () => {
-    // Busca el ID del input de fecha (soporta ambos nombres por seguridad)
     const inputFecha = document.getElementById("filtro-fecha-inicio") || document.getElementById("fechaReporte");
     const selectIdentificador = document.getElementById("identificadorReporte");
 
     if (inputFecha && selectIdentificador) {
-        // Se declara la función flecha como asíncrona (async) para permitir llamadas a la BD
         inputFecha.addEventListener("change", async () => {
-            const fechaElegida = inputFecha.value;
+            const fechaHTML = inputFecha.value; // Formato: YYYY-MM-DD (ej. 2026-10-05)
             
-            if (!fechaElegida) {
+            if (!fechaHTML) {
                 selectIdentificador.innerHTML = '<option value="">Selecciona primero una fecha...</option>';
                 return;
             }
 
-            // Mensaje de espera mientras se obtienen los datos
+            // INVERSIÓN DE FORMATO: Convertimos YYYY-MM-DD a DD/MM/YYYY para que coincida EXACTAMENTE con tu BD
+            const partes = fechaHTML.split('-');
+            const fechaBaseDatos = `${partes[2]}/${partes[1]}/${partes[0]}`; // ej. 05/10/2026
+
             selectIdentificador.innerHTML = '<option value="">Cargando identificadores...</option>';
 
             try {
-                // 1. CONEXIÓN A LA BASE DE DATOS (Usando tu propia función)
                 const datosBD = await obtenerDatosDesdeGoogle();
                 
-                // Validación estricta apuntando al nodo 'censo' de tu JSON
                 if (!datosBD || !datosBD.censo || datosBD.censo.length === 0) {
-                    console.warn("La base de datos (Censo) no está disponible o está vacía.");
                     selectIdentificador.innerHTML = '<option value="">Inicia sesión para cargar datos</option>';
                     return;
                 }
 
-                // 2. EXTRACCIÓN Y FILTRADO
-                const censoSeguro = datosBD.censo;
-                
-                const registrosFecha = censoSeguro.filter(p => {
-                    let fActividad = buscarDato(p, "fecha de la actividad");
-                    return fActividad ? normalizarFecha(fActividad) === fechaElegida : false;
+                // FILTRADO CON TUS CLAVES EXACTAS
+                const registrosFecha = datosBD.censo.filter(p => {
+                    let fActividad = String(buscarDato(p, "fecha de la actividad")).trim();
+                    return fActividad === fechaBaseDatos; // Comparación exacta: "05/10/2026" === "05/10/2026"
                 });
                 
-                // Creación de un arreglo único (Set) con los identificadores encontrados ese día
-                const identificadoresUnicos = [...new Set(registrosFecha.map(p => buscarDato(p, "identificador")).filter(Boolean))];
+                // EXTRACCIÓN DEL IDENTIFICADOR USANDO "lugar_fijo"
+                const identificadoresUnicos = [...new Set(registrosFecha.map(p => buscarDato(p, "lugar_fijo")).filter(Boolean))];
 
                 if (identificadoresUnicos.length === 0) {
                     selectIdentificador.innerHTML = '<option value="">No hubo actividades en esta fecha</option>';
                     return;
                 }
 
-                // 3. POBLACIÓN DEL DOM (Inyección de etiquetas <option>)
+                // POBLACIÓN DEL SELECT HTML
                 selectIdentificador.innerHTML = '<option value="">Seleccione el Identificador...</option>';
                 identificadoresUnicos.forEach(id => {
                     const opt = document.createElement("option");
@@ -64,7 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 });
                 
             } catch (error) {
-                console.error("Error al obtener los datos para el select:", error);
+                console.error("Error lógico:", error);
                 selectIdentificador.innerHTML = '<option value="">Error interno al cargar</option>';
             }
         });
@@ -1040,9 +1036,14 @@ function drawPdfShape(doc, x, y, meta) {
 async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSeleccionado) {
     try {
         // 1. FILTRADO ESTRICTO Y SIMBOLOGÍA
+        // Invertimos la fecha recibida del HTML (YYYY-MM-DD) al formato de tu BD (DD/MM/YYYY)
+        const partesFecha = fecha.split('-');
+        const fechaBD = `${partesFecha[2]}/${partesFecha[1]}/${partesFecha[0]}`;
+
         const accionesDelDia = datosUnificados.filter(p => {
-            let matchFecha = normalizarFecha(buscarDato(p, "fecha de la actividad")) === fecha;
-            let matchId = String(buscarDato(p, "identificador") || "").trim() === String(identificadorSeleccionado).trim();
+            let matchFecha = String(buscarDato(p, "fecha de la actividad")).trim() === fechaBD;
+            // Usamos tu clave real: lugar_fijo
+            let matchId = String(buscarDato(p, "lugar_fijo") || "").trim() === String(identificadorSeleccionado).trim();
             return matchFecha && matchId;
         });
 
