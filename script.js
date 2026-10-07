@@ -1260,32 +1260,42 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
         doc.setFontSize(8); doc.setFont(undefined, 'normal');
         
         accionesOrdenadas.forEach(p => {
+            // 1. Control de Paginación Dinámica
             if (yList > doc.internal.pageSize.height - 40) {
-                doc.addPage(); yList = drawTableHeader(40); doc.setFontSize(8); doc.setFont(undefined, 'normal');
+                doc.addPage(); 
+                yList = drawTableHeader(40); // Asume que tienes tu función drawTableHeader arriba
+                doc.setFontSize(8); 
+                doc.setFont(undefined, 'normal');
             }
 
+            // 2. Extracción segura y normalización a String para evitar fallos en splitTextToSize
             let dirBruta = buscarDato(p, "dirección") || buscarDato(p, "direccion") || "S/D";
             let colName = buscarDato(p, "colonia") || "";
             let direccion = colName ? `${String(dirBruta).trim()}, ${String(colName).trim()}` : String(dirBruta).trim();
             let dom = buscarDato(p, "domicilio visitado") || "S/D";
             let sit = buscarDato(p, "situación familiar") || buscarDato(p, "situacion familiar") || "S/D";
             
-            let vacsStr = p._vacunasImprimir.length > 0 ? p._vacunasImprimir.join(", ") : "Ninguna";
-            
+            // 3. Creación de líneas dinámicas para la tabla (Word-wrap)
             let dirLines = doc.splitTextToSize(direccion, 260);
             let domLines = doc.splitTextToSize(dom, 110);
             let sitLines = doc.splitTextToSize(sit, 130);
-            let vacsLines = doc.splitTextToSize(vacsStr, 150);
+            
+            // Cálculo del alto máximo de la fila. Evaluamos directamente el nuevo objeto _vacunasRender
+            let maxLines = Math.max(
+                dirLines.length, 
+                domLines.length, 
+                sitLines.length, 
+                (p._vacunasRender && p._vacunasRender.length > 0 ? p._vacunasRender.length : 1)
+            );
 
-            let maxLines = Math.max(dirLines.length, domLines.length, sitLines.length, vacsLines.length);
-
+            // 4. Impresión de datos generales (Siempre en negro)
             doc.setTextColor(0);
             doc.text(dirLines, 40, yList); 
             doc.text(domLines, 320, yList); 
             doc.text(sitLines, 450, yList);
             
             // ==========================================
-            // REGLA DE NEGOCIO: FORMATO CONDICIONAL DE VACUNAS
+            // 5. REGLA DE NEGOCIO: FORMATO CONDICIONAL DE VACUNAS
             // ==========================================
             let yVacuna = yList; // Puntero vertical independiente para la lista de vacunas
 
@@ -1298,13 +1308,13 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
                         doc.setLineWidth(0.5);
                         let textW = doc.getTextWidth(vac.nombre);
                         doc.text(vac.nombre, 600, yVacuna);
-                        doc.line(600, yVacuna + 2, 600 + textW, yVacuna + 2); // Trazo dinámico del subrayado
+                        doc.line(600, yVacuna + 2, 600 + textW, yVacuna + 2); // Trazo dinámico
                     } else {
                         // Antecedente (Pasado): Negro convencional
                         doc.setTextColor(0);
                         doc.text(vac.nombre, 600, yVacuna);
                     }
-                    yVacuna += 10; // Salto de línea para la siguiente vacuna de este paciente
+                    yVacuna += 10; // Salto de línea estricto para apilar las vacunas
                 });
             } else {
                 // Sin vacunas registradas
@@ -1312,11 +1322,11 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
                 doc.text("Ninguna", 600, yVacuna);
             }
 
-            // Calculo dinámico del espaciado de la fila base
+            // 6. Cálculo dinámico del espaciado de la fila base y divisor
             yList += (maxLines * 10) + 5;
             doc.setDrawColor(200); 
             doc.setLineWidth(0.5); 
-            doc.line(40, yList - 3, pW - 40, yList - 3); // Divisor de fila
+            doc.line(40, yList - 3, pW - 40, yList - 3); 
             yList += 8;
         });
 
