@@ -6,6 +6,61 @@ const USUARIOS_SISTEMA = [
     { usr: "operador", pass: "imss2026", inst: "IMSS" }
 ];
 
+// ==========================================
+// 1. AUTO-RELLENADO DINÁMICO (SCOPE GLOBAL)
+// ==========================================
+// Esto debe vivir libre en el archivo, no dentro de una función de botón.
+document.addEventListener("DOMContentLoaded", () => {
+    const inputFecha = document.getElementById("fechaReporte");
+    const selectIdentificador = document.getElementById("identificadorReporte");
+
+    if (inputFecha && selectIdentificador) {
+        inputFecha.addEventListener("change", () => {
+            // Validamos que los datos ya hayan sido descargados en el login
+            if (typeof datosUnificados === 'undefined' || !datosUnificados || datosUnificados.length === 0) {
+                console.warn("La base de datos aún no se ha cargado.");
+                selectIdentificador.innerHTML = '<option value="">Inicia sesión para cargar datos</option>';
+                return;
+            }
+
+            const fechaElegida = inputFecha.value;
+            selectIdentificador.innerHTML = '<option value="">Cargando identificadores...</option>';
+            
+            if (!fechaElegida) {
+                selectIdentificador.innerHTML = '<option value="">Selecciona primero una fecha...</option>';
+                return;
+            }
+
+            try {
+                // Extracción relacional segura
+                const registrosFecha = datosUnificados.filter(p => {
+                    let fActividad = buscarDato(p, "fecha de la actividad");
+                    return fActividad ? normalizarFecha(fActividad) === fechaElegida : false;
+                });
+                
+                const identificadoresUnicos = [...new Set(registrosFecha.map(p => buscarDato(p, "identificador")).filter(Boolean))];
+
+                if (identificadoresUnicos.length === 0) {
+                    selectIdentificador.innerHTML = '<option value="">No hubo actividades en esta fecha</option>';
+                    return;
+                }
+
+                // Población del select
+                selectIdentificador.innerHTML = '<option value="">Seleccione el Identificador...</option>';
+                identificadoresUnicos.forEach(id => {
+                    const opt = document.createElement("option");
+                    opt.value = id;
+                    opt.textContent = id;
+                    selectIdentificador.appendChild(opt);
+                });
+            } catch (error) {
+                console.error("Error lógico:", error);
+                selectIdentificador.innerHTML = '<option value="">Error interno</option>';
+            }
+        });
+    }
+});
+
 document.addEventListener("DOMContentLoaded", () => {
     const selectTipo = document.getElementById("filtro-tipo");
     const contenedorCaso = document.getElementById("contenedor-filtro-caso");
@@ -122,6 +177,8 @@ async function validarAcceso() {
     }
 }
 
+window.validarAcceso = validarAcceso;
+
 // 1. ESQUEMAS ORIGINALES CENSIA
 const ESQUEMAS = {
     "1-A": [ {label:"BCG",key:"bcg"}, {label:"HepB",key:"hepatitis b"}, {label:"Hexa 1",key:"hexavalente acelular (dpat-vip-hb-hib) 1"}, {label:"Hexa 2",key:"hexavalente acelular (dpat-vip-hb-hib) 2"}, {label:"Hexa 3",key:"hexavalente acelular (dpat-vip-hb-hib) 3"}, {label:"Hexa R",key:"hexavalente acelular (dpat-vip-hb-hib) refuerzo"}, {label:"DPT",key:"dpt"}, {label:"Rota 1",key:"rotavirus 1"}, {label:"Rota 2",key:"rotavirus 2"}, {label:"Neumo 1",key:"neumococica conjugada (13 serotipos) 1"}, {label:"Neumo 2",key:"neumococica conjugada (13 serotipos) 2"}, {label:"Neumo 3",key:"neumococica conjugada (13 serotipos) 3"}, {label:"Influ 1",key:"influenza 1"}, {label:"Influ 2",key:"influenza 2"}, {label:"Influ R",key:"influenza refuerzo"}, {label:"SRP 0",key:"srp 0"}, {label:"SRP 1",key:"srp 1"}, {label:"SRP 2",key:"srp 2"}, {label:"Otras",key:"otras"} ],
@@ -215,36 +272,49 @@ function buscarFechaVacuna(filasVacunas, keyVacuna) {
     return "";
 }
 
+// ==========================================
+// 2. FUNCIÓN DE EJECUCIÓN (DISPATCHER)
+// ==========================================
 async function ejecutarGeneracionPorFiltros() {
     const btn = document.querySelector(".panel-acciones .btn-principal");
     
     try {
         const tipoRep = document.getElementById("filtro-tipo").value;
-        const fInit = document.getElementById("filtro-fecha-inicio").value;
-        let fEnd = document.getElementById("filtro-fecha-fin").value;
+        
+        // Uso unificado de variables de lectura (Ajusta los IDs si usas 'filtro-fecha-inicio' o 'fechaReporte')
+        const inputFecha = document.getElementById("fechaReporte") || document.getElementById("filtro-fecha-inicio");
+        const fInit = inputFecha ? inputFecha.value : "";
+        
+        const inputFEnd = document.getElementById("fechaFinReporte") || document.getElementById("filtro-fecha-fin");
+        let fEnd = inputFEnd ? inputFEnd.value : "";
         if (!fEnd && fInit) fEnd = fInit; 
 
-        const vac = document.getElementById("filtro-vacunador").value;
-        const reg = document.getElementById("filtro-registrador").value;
+        const vac = document.getElementById("filtro-vacunador") ? document.getElementById("filtro-vacunador").value : "";
+        const reg = document.getElementById("filtro-registrador") ? document.getElementById("filtro-registrador").value : "";
         
-        // Ahora captura el valor exacto del desplegable
-        const casoSeleccionado = document.getElementById("filtro-caso").value; 
-        const instSeleccionada = document.getElementById("filtro-institucion").value;
+        const casoSeleccionado = document.getElementById("filtro-caso") ? document.getElementById("filtro-caso").value : ""; 
+        const instSeleccionada = document.getElementById("filtro-institucion") ? document.getElementById("filtro-institucion").value : "";
         
-        // REGLA DE NEGOCIO: Bloqueo de ejecución si falta el parámetro obligatorio
+        // Leer el identificador dinámico de la Bitácora
+        const selectIdentificador = document.getElementById("identificadorReporte");
+        const idActivo = selectIdentificador ? selectIdentificador.value : "";
+        
+        // REGLAS DE NEGOCIO Y BLOQUEOS
         if (tipoRep === "bloqueo" && !casoSeleccionado) {
-            throw new Error("Debe seleccionar un Caso (Bloqueo Terminado) del menú para generar este reporte.");
+            throw new Error("Debe seleccionar un Caso (Bloqueo Terminado) del menú.");
+        }
+        if (tipoRep === "mapa_diario" && (!fInit || !idActivo)) {
+            throw new Error("Para la Bitácora Diaria debe seleccionar la Fecha y el Identificador.");
         }
         
         btn.innerText = "Procesando Datos...";
         
+        // Simulación de tu fetch (se asume que obtenerDatosDesdeGoogle() existe)
         const datosBD = await obtenerDatosDesdeGoogle();
         if (!datosBD) throw new Error("No se recibió respuesta del servidor.");
         if (datosBD.error) throw new Error("Error interno: " + datosBD.error);
         
         const censoSeguro = datosBD.censo || [];
-        
-        // CORRECCIÓN: Declaración y asignación de la matriz de vacunas faltante
         const vacunasSeguras = datosBD.historial_vacunas || []; 
         
         if (censoSeguro.length === 0) throw new Error("La hoja de Censo está vacía.");
@@ -253,23 +323,14 @@ async function ejecutarGeneracionPorFiltros() {
             let fAct = normalizarFecha(buscarDato(p, "fecha de la actividad"));
             let instReg = String(buscarDato(p, "registrador_institucion")).toUpperCase(); 
 
-            let matchFecha = true;
-            if (fInit) {
-                matchFecha = (fAct >= fInit && fAct <= fEnd);
-            }
-
+            let matchFecha = fInit ? (fAct >= fInit && fAct <= fEnd) : true;
             let nombreVacBD = String(buscarDato(p, "nombre de vacunador")).trim();
             let nombreRegBD = String(buscarDato(p, "registrador_nombre")).trim();
             
             let matchVac = vac ? (nombreVacBD === vac) : true; 
             let matchReg = reg ? (nombreRegBD === reg) : true; 
-            
-            // Coincidencia estricta (===) para evitar cruces de datos entre casos con nombres similares
             let matchCaso = casoSeleccionado ? (buscarDato(p, "nombre del caso").trim() === casoSeleccionado) : true; 
-            
-            let matchInst = (instSeleccionada === "TODAS") 
-                            ? true 
-                            : instReg.includes(instSeleccionada);
+            let matchInst = (instSeleccionada === "TODAS" || !instSeleccionada) ? true : instReg.includes(instSeleccionada);
 
             return matchFecha && matchVac && matchReg && matchCaso && matchInst;
         });
@@ -280,89 +341,23 @@ async function ejecutarGeneracionPorFiltros() {
             return;
         }
 
-        // 4. CRUCE RELACIONAL BLINDADO
+        // CRUCE RELACIONAL BLINDADO
         const datosUnificados = pacientesFiltrados.map(p => ({
             ...p, 
             _historialVacunas: vacunasSeguras.filter(v => buscarDato(v, "id_paciente") == buscarDato(p, "id")) 
         }));
 
-        // ==========================================
-        // FASE DE EXTRACCIÓN: LECTURA DE CRITERIOS (DOM)
-        // ==========================================
-        // Se lee la fecha del input tipo date
-        const inputFecha = document.getElementById("fechaReporte");
-        const fInit = inputFecha ? inputFecha.value : "";
+        // ENRUTAMIENTO Y RENDERIZADO (Reemplaza con tus funciones reales)
+        if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
+        else if (tipoRep === "informe") generarInformeActividad(datosUnificados, fInit, fEnd);
+        else if (tipoRep === "bloqueo") generarAccionesBloqueo(datosUnificados, fInit, fEnd);
+        else if (tipoRep === "mapa_diario") generarMapaDiarioEnPDF(datosUnificados, fInit, idActivo);
 
-        // Se lee la fecha final (si aplica para tus otros reportes)
-        const inputFEnd = document.getElementById("fechaFinReporte"); // Ajusta el ID si es distinto
-        const fEnd = inputFEnd ? inputFEnd.value : "";
-
-        // Se lee el identificador del <select> dinámico que agregamos
-        const selectIdentificador = document.getElementById("identificadorReporte");
-        const idActivo = selectIdentificador ? selectIdentificador.value : "";
-
-        // (Opcional) Leer el tipo de reporte si no lo tienes ya en una variable
-        // const tipoRep = document.getElementById("tipoReporte").value;
-
-        // ==========================================
-        // AUTO-RELLENADO DINÁMICO DEL IDENTIFICADOR (VERSIÓN SEGURA / FAIL-SAFE)
-        // ==========================================
-        // El evento DOMContentLoaded garantiza que esto no bloquee el login ni la carga inicial
-        document.addEventListener("DOMContentLoaded", () => {
-            const inputFecha = document.getElementById("fechaReporte");
-            const selectIdentificador = document.getElementById("identificadorReporte");
-
-            if (inputFecha && selectIdentificador) {
-                inputFecha.addEventListener("change", () => {
-                    // 1. VALIDACIÓN ESTRICTA DE ESTADO: Evita que el script truene si no hay login
-                    if (typeof datosUnificados === 'undefined' || !datosUnificados || datosUnificados.length === 0) {
-                        console.warn("La base de datos aún no se ha cargado. Por favor inicia sesión primero.");
-                        selectIdentificador.innerHTML = '<option value="">Inicia sesión para cargar datos</option>';
-                        return;
-                    }
-
-                    const fechaElegida = inputFecha.value;
-                    selectIdentificador.innerHTML = '<option value="">Cargando identificadores...</option>';
-                    
-                    if (!fechaElegida) {
-                        selectIdentificador.innerHTML = '<option value="">Selecciona primero una fecha...</option>';
-                        return;
-                    }
-
-                    try {
-                        // 2. EXTRACCIÓN SEGURA
-                        const registrosFecha = datosUnificados.filter(p => {
-                            let fActividad = buscarDato(p, "fecha de la actividad");
-                            return fActividad ? normalizarFecha(fActividad) === fechaElegida : false;
-                        });
-                        
-                        const identificadoresUnicos = [...new Set(registrosFecha.map(p => buscarDato(p, "identificador")).filter(Boolean))];
-
-                        if (identificadoresUnicos.length === 0) {
-                            selectIdentificador.innerHTML = '<option value="">No hubo actividades en esta fecha</option>';
-                            return;
-                        }
-
-                        // 3. POBLACIÓN DEL DOM
-                        selectIdentificador.innerHTML = '<option value="">Seleccione el Identificador...</option>';
-                        identificadoresUnicos.forEach(id => {
-                            const opt = document.createElement("option");
-                            opt.value = id;
-                            opt.textContent = id;
-                            selectIdentificador.appendChild(opt);
-                        });
-                    } catch (error) {
-                        console.error("Error lógico en el filtrado de identificadores:", error);
-                        selectIdentificador.innerHTML = '<option value="">Error interno</option>';
-                    }
-                });
-            }
-        });
+        btn.innerText = "Generar Reporte Seleccionado";
 
     } catch (error) {
-        // 6. MANEJO DEL ERROR: Informa al usuario y libera la interfaz
         console.error("Fallo crítico detectado en el hilo de ejecución:", error);
-        alert("Ocurrió un error durante el procesamiento:\n" + error.message);
+        alert("Ocurrió un error:\n" + error.message);
         btn.innerText = "Generar Reporte Seleccionado";
     }
 }
