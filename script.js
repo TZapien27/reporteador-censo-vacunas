@@ -347,11 +347,22 @@ async function ejecutarGeneracionPorFiltros() {
             return;
         }
 
-        // CRUCE RELACIONAL BLINDADO
-        const datosUnificados = pacientesFiltrados.map(p => ({
-            ...p, 
-            _historialVacunas: vacunasSeguras.filter(v => buscarDato(v, "id_paciente") == buscarDato(p, "id")) 
-        }));
+        // ==========================================
+        // 4. CRUCE RELACIONAL BLINDADO (Censo 1:N Vacunas)
+        // ==========================================
+        const datosUnificados = pacientesFiltrados.map(p => {
+            // Llave Primaria (Censo)
+            let idPrimario = String(buscarDato(p, "id") || buscarDato(p, "ID") || "").trim();
+
+            return {
+                ...p, 
+                _historialVacunas: vacunasSeguras.filter(v => {
+                    // Llave Foránea (Historial_Vacunas)
+                    let idForaneo = String(buscarDato(v, "id_paciente") || buscarDato(v, "ID_Paciente") || "").trim();
+                    return idForaneo === idPrimario && idPrimario !== "";
+                })
+            };
+        });
 
         // ENRUTAMIENTO Y RENDERIZADO (Reemplaza con tus funciones reales)
         if (tipoRep === "censo") generarAnexosCenso(datosUnificados, fInit, fEnd);
@@ -1186,26 +1197,49 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
             col++; if (col > 2) { col = 0; fila++; } 
         });
 
+        // ==========================================
         // 4. BIFURCACIÓN DE DOMICILIOS Y DESGLOSE ESTADÍSTICO
-        let conVacuna = []; let sinVacuna = [];
-        let totalDosisGral = 0; let desgloseBiologicos = {};
+        // ==========================================
+        let conVacuna = []; 
+        let sinVacuna = [];
+        let totalDosisGral = 0; 
+        let desgloseBiologicos = {};
 
         accionesDelDia.forEach(p => {
-            let vacsHoy = [];
-            if (p._historialVacunas) {
+            let vacunasRender = []; // Arreglo de objetos para controlar el formato condicional
+            let aplicoHoy = false;  // Bandera para clasificar el domicilio
+            
+            if (p._historialVacunas && p._historialVacunas.length > 0) {
                 p._historialVacunas.forEach(v => {
-                    if (normalizarFecha(buscarDato(v, "fecha_ingresada")) === fecha) {
-                        let nombreVac = String(buscarDato(v, "biologico") || buscarDato(v, "biológico") || "").trim();
-                        vacsHoy.push(nombreVac);
+                    // Lectura exacta con los nombres de columna de tu Base de Datos
+                    let fechaVacunaCruda = String(buscarDato(v, "fecha_ingresada") || buscarDato(v, "Fecha_Ingresada") || "").trim();
+                    let nombreVacuna = String(buscarDato(v, "vacuna_aplicada") || buscarDato(v, "Vacuna_Aplicada") || "Desconocida").trim();
+
+                    // Evaluación: ¿La fecha de esta vacuna coincide con la fecha del reporte?
+                    let esDeHoy = (fechaVacunaCruda === fechaBD);
+
+                    if (esDeHoy) {
+                        aplicoHoy = true;
                         totalDosisGral++;
-                        desgloseBiologicos[nombreVac] = (desgloseBiologicos[nombreVac] || 0) + 1;
+                        desgloseBiologicos[nombreVacuna] = (desgloseBiologicos[nombreVacuna] || 0) + 1;
                     }
+                    
+                    // Guardamos el objeto completo para renderizarlo después
+                    vacunasRender.push({ nombre: nombreVacuna, esDeHoy: esDeHoy });
                 });
             }
-            p._vacunasImprimir = vacsHoy; 
-            if (vacsHoy.length > 0) conVacuna.push(p); else sinVacuna.push(p);
+            
+            p._vacunasRender = vacunasRender; 
+            
+            // Si hubo al menos una vacuna HOY, va primero. Si solo son antecedentes o vacío, va después.
+            if (aplicoHoy) {
+                conVacuna.push(p);
+            } else {
+                sinVacuna.push(p);
+            }
         });
 
+        let accionesOrdenadas = [...conVacuna, ...sinVacuna];
         let accionesOrdenadas = [...conVacuna, ...sinVacuna]; // Agrupamos: Vacunados primero
 
         doc.addPage();
@@ -1247,14 +1281,43 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
             let maxLines = Math.max(dirLines.length, domLines.length, sitLines.length, vacsLines.length);
 
             doc.setTextColor(0);
-            doc.text(dirLines, 40, yList); doc.text(domLines, 320, yList); doc.text(sitLines, 450, yList);
+            doc.text(dirLines, 40, yList); 
+            doc.text(domLines, 320, yList); 
+            doc.text(sitLines, 450, yList);
             
-            // Regla de color para tabla: Vacunas en rojo, sin subrayado rompe-tablas.
-            if (p._vacunasImprimir.length > 0) doc.setTextColor(255, 0, 0); 
-            doc.text(vacsLines, 600, yList);
+            // ==========================================
+            // REGLA DE NEGOCIO: FORMATO CONDICIONAL DE VACUNAS
+            // ==========================================
+            let yVacuna = yList; // Puntero vertical independiente para la lista de vacunas
 
+            if (p._vacunasRender && p._vacunasRender.length > 0) {
+                p._vacunasRender.forEach(vac => {
+                    if (vac.esDeHoy) {
+                        // Vacuna de HOY: Rojo y Subrayada
+                        doc.setTextColor(255, 0, 0); 
+                        doc.setDrawColor(255, 0, 0);
+                        doc.setLineWidth(0.5);
+                        let textW = doc.getTextWidth(vac.nombre);
+                        doc.text(vac.nombre, 600, yVacuna);
+                        doc.line(600, yVacuna + 2, 600 + textW, yVacuna + 2); // Trazo dinámico del subrayado
+                    } else {
+                        // Antecedente (Pasado): Negro convencional
+                        doc.setTextColor(0);
+                        doc.text(vac.nombre, 600, yVacuna);
+                    }
+                    yVacuna += 10; // Salto de línea para la siguiente vacuna de este paciente
+                });
+            } else {
+                // Sin vacunas registradas
+                doc.setTextColor(0);
+                doc.text("Ninguna", 600, yVacuna);
+            }
+
+            // Calculo dinámico del espaciado de la fila base
             yList += (maxLines * 10) + 5;
-            doc.setDrawColor(200); doc.setLineWidth(0.5); doc.line(40, yList - 3, pW - 40, yList - 3);
+            doc.setDrawColor(200); 
+            doc.setLineWidth(0.5); 
+            doc.line(40, yList - 3, pW - 40, yList - 3); // Divisor de fila
             yList += 8;
         });
 
