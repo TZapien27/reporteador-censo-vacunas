@@ -1142,17 +1142,49 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
         
         const mapaImagenBase64 = canvas.toDataURL("image/png");
 
-        // 3. EXTRACCIÓN DE METADATOS Y CREACIÓN DEL PDF
+        // ==========================================
+        // 3. EXTRACCIÓN DINÁMICA DE METADATOS (Múltiples Vacunadores y Registradores)
+        // ==========================================
         let ref = accionesDelDia[0]; 
-        let v_inst = buscarDato(ref, "institución que reporta la actividad") || buscarDato(ref, "institución") || "N/A";
-        let v_tipo = buscarDato(ref, "tipo de actividad") || "N/A";
-        let v_vac1 = buscarDato(ref, "nombre de vacunador") || "N/A";
-        let v_vac2 = buscarDato(ref, "nombre de vacunador / responsable 2") || "N/A";
-        let v_reg_nombre = buscarDato(ref, "registrador_nombre") || "N/A";
-        let v_reg_inst = buscarDato(ref, "registrador_institucion") || "N/A";
+        let v_inst = String(buscarDato(ref, "institución que reporta la actividad") || buscarDato(ref, "institución") || "N/A").trim();
+        let v_tipo = String(buscarDato(ref, "tipo de actividad") || "N/A").trim();
 
-        let arrAgebs = [...new Set(accionesDelDia.map(p => buscarDato(p, "ageb")).filter(Boolean))];
+        // Función auxiliar interna para extraer, limpiar nulos y eliminar duplicados de un arreglo
+        const obtenerValoresUnicos = (campo1, campo2) => {
+            let valores = accionesDelDia.map(p => String(buscarDato(p, campo1) || buscarDato(p, campo2) || ""));
+            return [...new Set(valores.filter(v => v && v.trim() !== "" && v.trim() !== "undefined" && v.trim() !== "null"))];
+        };
+
+        // Extracción Vectorial: Vacunadores (Busca en minúsculas y capitalizado)
+        let arrVac1 = obtenerValoresUnicos("nombre de vacunador", "Nombre de vacunador");
+        let v_vac1 = arrVac1.length > 0 ? arrVac1.join(", ") : "N/A";
+
+        let arrVac2 = obtenerValoresUnicos("nombre de vacunador / responsable 2", "Nombre de vacunador / responsable 2");
+        let v_vac2 = arrVac2.length > 0 ? arrVac2.join(", ") : "N/A";
+
+        // ==========================================
+        // Extracción Vectorial: Registradores (Acceso Estricto a Llaves Exactas)
+        // ==========================================
+        let arrRegNombre = [...new Set(accionesDelDia.map(p => {
+            // Se prioriza el acceso directo y exacto al objeto JSON en memoria
+            let val = p["Registrador_Nombre"] || buscarDato(p, "Registrador_Nombre");
+            return (val && String(val).trim() !== "" && String(val).trim() !== "undefined" && String(val).trim() !== "null") 
+                   ? String(val).trim() : "";
+        }).filter(v => v !== ""))];
+        let v_reg_nombre = arrRegNombre.length > 0 ? arrRegNombre.join(", ") : "N/A";
+
+        let arrRegInst = [...new Set(accionesDelDia.map(p => {
+            // Se prioriza el acceso directo y exacto al objeto JSON en memoria
+            let val = p["Registrador_Institucion"] || buscarDato(p, "Registrador_Institucion");
+            return (val && String(val).trim() !== "" && String(val).trim() !== "undefined" && String(val).trim() !== "null") 
+                   ? String(val).trim() : "";
+        }).filter(v => v !== ""))];
+        let v_reg_inst = arrRegInst.length > 0 ? arrRegInst.join(", ") : "N/A";
+
+        // Extracción Vectorial: AGEBs
+        let arrAgebs = obtenerValoresUnicos("ageb", "AGEB");
         let v_agebs = arrAgebs.length > 0 ? arrAgebs.join(", ") : "N/A";
+
         let arrColonias = [...new Set(accionesDelDia.map(p => { let val = buscarDato(p, "colonia"); return val ? String(val).trim() : null; }).filter(Boolean))];
         let v_colonias = arrColonias.length > 0 ? arrColonias.join(", ") : "N/A";
 
@@ -1198,7 +1230,7 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
         });
 
         // ==========================================
-        // 4. BIFURCACIÓN DE DOMICILIOS Y DESGLOSE ESTADÍSTICO
+        // 4. BIFURCACIÓN DE DOMICILIOS Y EXTRACCIÓN ESTRICTA DE VACUNAS
         // ==========================================
         let conVacuna = []; 
         let sinVacuna = [];
@@ -1206,37 +1238,36 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
         let desgloseBiologicos = {};
 
         accionesDelDia.forEach(p => {
-            let vacunasRender = []; // Arreglo de objetos para controlar el formato condicional
-            let aplicoHoy = false;  // Bandera para clasificar el domicilio
-            
-            if (p._historialVacunas && p._historialVacunas.length > 0) {
+            let vacunasExtraidas = []; 
+            let idPrimario = String(buscarDato(p, "ID") || buscarDato(p, "id") || "").trim();
+
+            // Candado 1: El ID Primario no puede estar vacío
+            if (p._historialVacunas && Array.isArray(p._historialVacunas) && idPrimario !== "") {
                 p._historialVacunas.forEach(v => {
-                    // Lectura exacta con los nombres de columna de tu Base de Datos
-                    let fechaVacunaCruda = String(buscarDato(v, "fecha_ingresada") || buscarDato(v, "Fecha_Ingresada") || "").trim();
-                    let nombreVacuna = String(buscarDato(v, "vacuna_aplicada") || buscarDato(v, "Vacuna_Aplicada") || "Desconocida").trim();
+                    let idForaneo = String(buscarDato(v, "ID_Paciente") || buscarDato(v, "id_paciente") || "").trim();
+                    let fechaVacunaCruda = String(buscarDato(v, "Fecha_Ingresada") || buscarDato(v, "fecha_ingresada") || "").trim();
 
-                    // Evaluación: ¿La fecha de esta vacuna coincide con la fecha del reporte?
-                    let esDeHoy = (fechaVacunaCruda === fechaBD);
-
-                    if (esDeHoy) {
-                        aplicoHoy = true;
-                        totalDosisGral++;
-                        desgloseBiologicos[nombreVacuna] = (desgloseBiologicos[nombreVacuna] || 0) + 1;
+                    // Candado 2: Cruce exacto de IDs y fecha idéntica a la seleccionada
+                    if (idForaneo === idPrimario && fechaVacunaCruda === fechaBD) {
+                        let nombreVacuna = String(buscarDato(v, "Vacuna_Aplicada") || buscarDato(v, "vacuna_aplicada") || "Desconocida").trim();
+                        vacunasExtraidas.push(nombreVacuna);
                     }
-                    
-                    // Guardamos el objeto completo para renderizarlo después
-                    vacunasRender.push({ nombre: nombreVacuna, esDeHoy: esDeHoy });
                 });
             }
             
-            p._vacunasRender = vacunasRender; 
+            // Candado 3: Deduplicación final (Elimina vacunas idénticas repetidas por error de captura)
+            let vacunasUnicasDeHoy = [...new Set(vacunasExtraidas)];
+
+            // Contabilización estadística basada solo en datos limpios
+            vacunasUnicasDeHoy.forEach(vac => {
+                totalDosisGral++;
+                desgloseBiologicos[vac] = (desgloseBiologicos[vac] || 0) + 1;
+            });
             
-            // Si hubo al menos una vacuna HOY, va primero. Si solo son antecedentes o vacío, va después.
-            if (aplicoHoy) {
-                conVacuna.push(p);
-            } else {
-                sinVacuna.push(p);
-            }
+            p._vacunasRender = vacunasUnicasDeHoy.length > 0 ? vacunasUnicasDeHoy : null; 
+            
+            if (p._vacunasRender !== null) conVacuna.push(p);
+            else sinVacuna.push(p);
         });
 
         let accionesOrdenadas = [...conVacuna, ...sinVacuna];
@@ -1293,47 +1324,60 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
             doc.text(dirLines, 40, yList); 
             doc.text(domLines, 320, yList); 
             doc.text(sitLines, 450, yList);
-            
-            // ==========================================
-            // 5. REGLA DE NEGOCIO: FORMATO CONDICIONAL DE VACUNAS
-            // ==========================================
-            let yVacuna = yList; // Puntero vertical independiente para la lista de vacunas
 
-            if (p._vacunasRender && p._vacunasRender.length > 0) {
-                p._vacunasRender.forEach(vac => {
-                    if (vac.esDeHoy) {
-                        // Vacuna de HOY: Rojo y Subrayada
-                        doc.setTextColor(255, 0, 0); 
-                        doc.setDrawColor(255, 0, 0);
-                        doc.setLineWidth(0.5);
-                        let textW = doc.getTextWidth(vac.nombre);
-                        doc.text(vac.nombre, 600, yVacuna);
-                        doc.line(600, yVacuna + 2, 600 + textW, yVacuna + 2); // Trazo dinámico
-                    } else {
-                        // Antecedente (Pasado): Negro convencional
-                        doc.setTextColor(0);
-                        doc.text(vac.nombre, 600, yVacuna);
-                    }
-                    yVacuna += 10; // Salto de línea estricto para apilar las vacunas
+            let yVacuna = yList;
+
+            // ==========================================
+            // REGLA VISUAL DE FORMATO: SOLO VACUNAS DE HOY (ROJO)
+            // ==========================================
+            if (p._vacunasRender) {
+                // Pincel maestro en rojo para el bloque de vacunas
+                doc.setTextColor(255, 0, 0); 
+                doc.setDrawColor(255, 0, 0); 
+                doc.setLineWidth(0.5);
+
+                p._vacunasRender.forEach(vacNombre => {
+                    let textW = doc.getTextWidth(vacNombre);
+                    doc.text(vacNombre, 600, yVacuna);
+                    doc.line(600, yVacuna + 2, 600 + textW, yVacuna + 2); // Subrayado dinámico
+                    yVacuna += 10; 
                 });
             } else {
-                // Sin vacunas registradas
+                // Impresión para domicilios marcados como "Ninguna"
                 doc.setTextColor(0);
                 doc.text("Ninguna", 600, yVacuna);
             }
 
-            // 6. Cálculo dinámico del espaciado de la fila base y divisor
-            yList += (maxLines * 10) + 5;
+            // Cierre de fila
+            yList += ((maxLines - 1) * 10) + 8; 
+            
             doc.setDrawColor(200); 
             doc.setLineWidth(0.5); 
-            doc.line(40, yList - 3, pW - 40, yList - 3); 
-            yList += 8;
+            doc.line(40, yList, pW - 40, yList); 
+            
+            // Añadimos 12 puntos de salto para establecer la "línea base" del siguiente registro
+            yList += 12; 
         });
 
-        // 5. TOTALES Y DESGLOSE ESTADÍSTICO
-        if (yList > doc.internal.pageSize.height - 120) { doc.addPage(); yList = 40; }
+        // ==========================================
+        // 5. TOTALES Y DESGLOSE ESTADÍSTICO (Con Paginación Predictiva)
+        // ==========================================
+        let llavesBiologicos = Object.keys(desgloseBiologicos);
+        let numBiologicos = llavesBiologicos.length;
+        
+        // Cálculo del espacio requerido: 80pts fijos + (12pts por cada vacuna) + 30pts de margen de seguridad
+        let espacioPredictivo = 80 + (numBiologicos > 0 ? numBiologicos * 12 : 12) + 30;
 
-        yList += 15; doc.setDrawColor(0); doc.setLineWidth(1.5); doc.line(40, yList, pW - 40, yList);
+        // Evaluación dinámica: Si no cabe todo el bloque completo, forzamos página nueva
+        if (yList + espacioPredictivo > doc.internal.pageSize.height) { 
+            doc.addPage(); 
+            yList = 40; 
+        }
+
+        yList += 15; 
+        doc.setDrawColor(0); 
+        doc.setLineWidth(1.5); 
+        doc.line(40, yList, pW - 40, yList);
         yList += 15;
         
         doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(0);
@@ -1346,20 +1390,23 @@ async function generarMapaDiarioEnPDF(datosUnificados, fecha, identificadorSelec
         
         yList += 20;
         doc.setTextColor(255, 0, 0); doc.setFont(undefined, 'bold');
-        doc.text(`Total Dosis Aplicadas: ${totalDosisGral}`, 40, yList);
+        doc.text(`Total Dosis Aplicadas (Hoy): ${totalDosisGral}`, 40, yList);
         
         let xDesglose = 260; let yDesglose = yList; doc.setFont(undefined, 'normal');
         
-        if(Object.keys(desgloseBiologicos).length > 0) {
+        if (numBiologicos > 0 && totalDosisGral > 0) {
             Object.entries(desgloseBiologicos).forEach(([vacuna, cantidad]) => {
                 doc.text(`- ${vacuna}: ${cantidad} dosis`, xDesglose, yDesglose);
                 yDesglose += 12;
             });
         } else {
-            doc.text("Ninguna vacuna aplicada.", xDesglose, yDesglose);
+            doc.text("Ninguna vacuna aplicada hoy.", xDesglose, yDesglose);
         }
 
-        doc.save(`Bitacora_${fecha}_${identificadorSeleccionado}.pdf`);
+        // Formateo del nombre del archivo para que no marque error en Windows con las diagonales
+        const nombreArchivo = `Bitacora_${fecha.replace(/\//g, '-')}_${identificadorSeleccionado}.pdf`;
+        doc.save(nombreArchivo);
+        
     } catch (error) {
         console.error("Error:", error);
         alert(error.message);
