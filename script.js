@@ -10,21 +10,67 @@ const USUARIOS_SISTEMA = [
 // 1. AUTO-RELLENADO DINÁMICO (Con claves y formatos exactos)
 // ==========================================
 document.addEventListener("DOMContentLoaded", () => {
+    // 1. REFERENCIAS AL DOM (Se agregan los selectores de Reporte y Contenedores)
     const inputFecha = document.getElementById("filtro-fecha-inicio") || document.getElementById("fechaReporte");
     const selectIdentificador = document.getElementById("identificadorReporte");
+    const selectTipoReporte = document.getElementById("tipoReporte"); // Asegúrate de usar el ID de tu selector de reportes
+    
+    // Contenedores visuales para ocultar etiqueta + input juntos
+    const contenedorFecha = document.getElementById("contenedorFecha"); 
+    const contenedorIdentificador = document.getElementById("contenedorIdentificador");
 
+    // ==========================================
+    // 2. LÓGICA DE INTERFAZ DINÁMICA POR TIPO DE REPORTE
+    // ==========================================
+    if (selectTipoReporte) {
+        selectTipoReporte.addEventListener("change", (e) => {
+            const tipo = String(e.target.value).trim();
+
+            // REPORTE 3: Acciones en Bloqueo Vacunal (Ocultar Fecha e Identificador)
+            if (tipo === "3" || tipo.toLowerCase().includes("bloqueo")) {
+                if (contenedorFecha) contenedorFecha.style.display = "none";
+                if (contenedorIdentificador) contenedorIdentificador.style.display = "none";
+                
+                // Evitar validación requerida invisible
+                if (inputFecha) inputFecha.required = false;
+                if (selectIdentificador) selectIdentificador.required = false;
+            } 
+            else {
+                // RESTAURAR VISIBILIDAD (Reportes 1, 2 y 4)
+                if (contenedorFecha) contenedorFecha.style.display = "block";
+                if (contenedorIdentificador) contenedorIdentificador.style.display = "block";
+                
+                if (inputFecha) inputFecha.required = true;
+
+                // REPORTE 2: Informe Final (Identificador es OPCIONAL)
+                if (tipo === "2" || tipo.toLowerCase().includes("informe final")) {
+                    if (selectIdentificador) selectIdentificador.required = false;
+                } else {
+                    // REPORTES 1 y 4 (Identificador es OBLIGATORIO)
+                    if (selectIdentificador) selectIdentificador.required = true;
+                }
+            }
+        });
+
+        // Forzar disparo del evento al cargar para establecer el estado inicial correcto
+        selectTipoReporte.dispatchEvent(new Event("change"));
+    }
+
+    // ==========================================
+    // 3. POBLACIÓN DINÁMICA DE IDENTIFICADORES (Tu código original)
+    // ==========================================
     if (inputFecha && selectIdentificador) {
         inputFecha.addEventListener("change", async () => {
-            const fechaHTML = inputFecha.value; // Formato: YYYY-MM-DD (ej. 2026-10-05)
+            const fechaHTML = inputFecha.value; // Formato: YYYY-MM-DD
             
             if (!fechaHTML) {
                 selectIdentificador.innerHTML = '<option value="">Selecciona primero una fecha...</option>';
                 return;
             }
 
-            // INVERSIÓN DE FORMATO: Convertimos YYYY-MM-DD a DD/MM/YYYY para que coincida EXACTAMENTE con tu BD
+            // INVERSIÓN DE FORMATO
             const partes = fechaHTML.split('-');
-            const fechaBaseDatos = `${partes[2]}/${partes[1]}/${partes[0]}`; // ej. 05/10/2026
+            const fechaBaseDatos = `${partes[2]}/${partes[1]}/${partes[0]}`; 
 
             selectIdentificador.innerHTML = '<option value="">Cargando identificadores...</option>';
 
@@ -39,10 +85,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 // FILTRADO CON TUS CLAVES EXACTAS
                 const registrosFecha = datosBD.censo.filter(p => {
                     let fActividad = String(buscarDato(p, "fecha de la actividad")).trim();
-                    return fActividad === fechaBaseDatos; // Comparación exacta: "05/10/2026" === "05/10/2026"
+                    return fActividad === fechaBaseDatos; 
                 });
                 
-                // EXTRACCIÓN DEL IDENTIFICADOR USANDO "lugar_fijo"
+                // EXTRACCIÓN DEL IDENTIFICADOR
                 const identificadoresUnicos = [...new Set(registrosFecha.map(p => buscarDato(p, "lugar_fijo")).filter(Boolean))];
 
                 if (identificadoresUnicos.length === 0) {
