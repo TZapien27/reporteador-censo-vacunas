@@ -6,40 +6,32 @@ const USUARIOS_SISTEMA = [
     { usr: "operador", pass: "imss2026", inst: "IMSS" }
 ];
 
-// ==========================================
-// 1. AUTO-RELLENADO DINÁMICO (Con claves y formatos exactos)
-// ==========================================
 document.addEventListener("DOMContentLoaded", () => {
-    // 1. REFERENCIAS AL DOM (Se agregan los selectores de Reporte y Contenedores)
+    // Referencias al DOM
     const inputFecha = document.getElementById("filtro-fecha-inicio") || document.getElementById("fechaReporte");
     const selectIdentificador = document.getElementById("identificadorReporte");
-    const selectTipoReporte = document.getElementById("tipoReporte"); // Asegúrate de usar el ID de tu selector de reportes
-    
-    // Contenedores visuales para ocultar etiqueta + input juntos
+    const selectTipoReporte = document.getElementById("tipoReporte"); 
     const contenedorFecha = document.getElementById("contenedorFecha"); 
     const contenedorIdentificador = document.getElementById("contenedorIdentificador");
 
     // ==========================================
-    // 2. LÓGICA DE INTERFAZ DINÁMICA POR TIPO DE REPORTE
+    // 1. MANEJADOR DE ESTADO POR TIPO DE REPORTE
     // ==========================================
     if (selectTipoReporte) {
         selectTipoReporte.addEventListener("change", (e) => {
             const tipo = String(e.target.value).trim();
 
-            // REPORTE 3: Acciones en Bloqueo Vacunal (Ocultar Fecha e Identificador)
+            // REPORTE 3: Bloqueos (Ocultar Todo)
             if (tipo === "3" || tipo.toLowerCase().includes("bloqueo")) {
                 if (contenedorFecha) contenedorFecha.style.display = "none";
                 if (contenedorIdentificador) contenedorIdentificador.style.display = "none";
-                
-                // Evitar validación requerida invisible
                 if (inputFecha) inputFecha.required = false;
                 if (selectIdentificador) selectIdentificador.required = false;
             } 
             else {
-                // RESTAURAR VISIBILIDAD (Reportes 1, 2 y 4)
+                // REPORTES 1, 2 y 4: Mostrar Todo
                 if (contenedorFecha) contenedorFecha.style.display = "block";
                 if (contenedorIdentificador) contenedorIdentificador.style.display = "block";
-                
                 if (inputFecha) inputFecha.required = true;
 
                 // REPORTE 2: Informe Final (Identificador es OPCIONAL)
@@ -50,25 +42,30 @@ document.addEventListener("DOMContentLoaded", () => {
                     if (selectIdentificador) selectIdentificador.required = true;
                 }
             }
+
+            // Forzar recarga de identificadores si ya hay una fecha puesta y el usuario cambia de reporte
+            if (inputFecha && inputFecha.value) {
+                inputFecha.dispatchEvent(new Event("change"));
+            }
         });
 
-        // Forzar disparo del evento al cargar para establecer el estado inicial correcto
-        selectTipoReporte.dispatchEvent(new Event("change"));
+        // Disparar estado inicial
+        selectTipoReporte.dispatchEvent(new Event("change")); 
     }
 
     // ==========================================
-    // 3. POBLACIÓN DINÁMICA DE IDENTIFICADORES (Tu código original)
+    // 2. POBLACIÓN DINÁMICA DE IDENTIFICADORES (Tu código refactorizado)
     // ==========================================
     if (inputFecha && selectIdentificador) {
         inputFecha.addEventListener("change", async () => {
-            const fechaHTML = inputFecha.value; // Formato: YYYY-MM-DD
+            const fechaHTML = inputFecha.value; 
             
             if (!fechaHTML) {
                 selectIdentificador.innerHTML = '<option value="">Selecciona primero una fecha...</option>';
                 return;
             }
 
-            // INVERSIÓN DE FORMATO
+            // Inversión de formato YYYY-MM-DD a DD/MM/YYYY
             const partes = fechaHTML.split('-');
             const fechaBaseDatos = `${partes[2]}/${partes[1]}/${partes[0]}`; 
 
@@ -82,13 +79,13 @@ document.addEventListener("DOMContentLoaded", () => {
                     return;
                 }
 
-                // FILTRADO CON TUS CLAVES EXACTAS
+                // Filtrado de registros exactos por fecha
                 const registrosFecha = datosBD.censo.filter(p => {
                     let fActividad = String(buscarDato(p, "fecha de la actividad")).trim();
                     return fActividad === fechaBaseDatos; 
                 });
                 
-                // EXTRACCIÓN DEL IDENTIFICADOR
+                // Extracción deduplicada
                 const identificadoresUnicos = [...new Set(registrosFecha.map(p => buscarDato(p, "lugar_fijo")).filter(Boolean))];
 
                 if (identificadoresUnicos.length === 0) {
@@ -96,8 +93,18 @@ document.addEventListener("DOMContentLoaded", () => {
                     return;
                 }
 
-                // POBLACIÓN DEL SELECT HTML
                 selectIdentificador.innerHTML = '<option value="">Seleccione el Identificador...</option>';
+
+                // INYECCIÓN LÓGICA: Solo si es Reporte 2, agregar "TODOS"
+                const tipoActual = selectTipoReporte ? String(selectTipoReporte.value).trim() : "";
+                if (tipoActual === "2" || tipoActual.toLowerCase().includes("informe final")) {
+                    const optTodos = document.createElement("option");
+                    optTodos.value = "TODOS";
+                    optTodos.textContent = "⭐ Toda la jornada (Todas las actividades)";
+                    selectIdentificador.appendChild(optTodos);
+                }
+
+                // Llenado normal
                 identificadoresUnicos.forEach(id => {
                     const opt = document.createElement("option");
                     opt.value = id;
