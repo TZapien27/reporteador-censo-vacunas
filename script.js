@@ -7,35 +7,40 @@ const USUARIOS_SISTEMA = [
 ];
 
 document.addEventListener("DOMContentLoaded", () => {
-    // Referencias al DOM
+    // 1. REFERENCIAS AL DOM (Alineadas con tu index.html)
     const inputFecha = document.getElementById("filtro-fecha-inicio") || document.getElementById("fechaReporte");
     const selectIdentificador = document.getElementById("identificadorReporte");
-    const selectTipoReporte = document.getElementById("tipoReporte"); 
+    
+    // AQUÍ ESTÁ LA CORRECCIÓN CLAVE: Apuntamos al ID real de tu HTML
+    const selectTipoReporte = document.getElementById("filtro-tipo"); 
+    
+    // Contenedores visuales (Verifica que estos IDs coincidan con tu HTML)
     const contenedorFecha = document.getElementById("contenedorFecha"); 
     const contenedorIdentificador = document.getElementById("contenedorIdentificador");
 
     // ==========================================
-    // 1. MANEJADOR DE ESTADO POR TIPO DE REPORTE
+    // 2. MANEJADOR DE ESTADO DE LA INTERFAZ
     // ==========================================
     if (selectTipoReporte) {
         selectTipoReporte.addEventListener("change", (e) => {
-            const tipo = String(e.target.value).trim();
+            // Leemos el 'value' exacto de tu HTML (ej. "censo", "informe", etc.)
+            const tipo = String(e.target.value).trim().toLowerCase();
 
             // REPORTE 3: Bloqueos (Ocultar Todo)
-            if (tipo === "3" || tipo.toLowerCase().includes("bloqueo")) {
+            if (tipo === "bloqueo") {
                 if (contenedorFecha) contenedorFecha.style.display = "none";
                 if (contenedorIdentificador) contenedorIdentificador.style.display = "none";
                 if (inputFecha) inputFecha.required = false;
                 if (selectIdentificador) selectIdentificador.required = false;
             } 
             else {
-                // REPORTES 1, 2 y 4: Mostrar Todo
+                // RESTAURAR VISIBILIDAD
                 if (contenedorFecha) contenedorFecha.style.display = "block";
                 if (contenedorIdentificador) contenedorIdentificador.style.display = "block";
                 if (inputFecha) inputFecha.required = true;
 
                 // REPORTE 2: Informe Final (Identificador es OPCIONAL)
-                if (tipo === "2" || tipo.toLowerCase().includes("informe final")) {
+                if (tipo === "informe") {
                     if (selectIdentificador) selectIdentificador.required = false;
                 } else {
                     // REPORTES 1 y 4 (Identificador es OBLIGATORIO)
@@ -43,18 +48,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
             }
 
-            // Forzar recarga de identificadores si ya hay una fecha puesta y el usuario cambia de reporte
+            // Cross-Event: Forzar recarga si cambia el reporte
             if (inputFecha && inputFecha.value) {
                 inputFecha.dispatchEvent(new Event("change"));
             }
         });
 
-        // Disparar estado inicial
+        // Estado inicial
         selectTipoReporte.dispatchEvent(new Event("change")); 
     }
 
     // ==========================================
-    // 2. POBLACIÓN DINÁMICA DE IDENTIFICADORES (Tu código refactorizado)
+    // 3. POBLACIÓN DINÁMICA DE IDENTIFICADORES Y BYPASS
     // ==========================================
     if (inputFecha && selectIdentificador) {
         inputFecha.addEventListener("change", async () => {
@@ -65,7 +70,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
 
-            // Inversión de formato YYYY-MM-DD a DD/MM/YYYY
             const partes = fechaHTML.split('-');
             const fechaBaseDatos = `${partes[2]}/${partes[1]}/${partes[0]}`; 
 
@@ -79,13 +83,11 @@ document.addEventListener("DOMContentLoaded", () => {
                     return;
                 }
 
-                // Filtrado de registros exactos por fecha
                 const registrosFecha = datosBD.censo.filter(p => {
                     let fActividad = String(buscarDato(p, "fecha de la actividad")).trim();
                     return fActividad === fechaBaseDatos; 
                 });
                 
-                // Extracción deduplicada
                 const identificadoresUnicos = [...new Set(registrosFecha.map(p => buscarDato(p, "lugar_fijo")).filter(Boolean))];
 
                 if (identificadoresUnicos.length === 0) {
@@ -95,9 +97,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 selectIdentificador.innerHTML = '<option value="">Seleccione el Identificador...</option>';
 
-                // INYECCIÓN LÓGICA: Solo si es Reporte 2, agregar "TODOS"
-                const tipoActual = selectTipoReporte ? String(selectTipoReporte.value).trim() : "";
-                if (tipoActual === "2" || tipoActual.toLowerCase().includes("informe final")) {
+                // INYECCIÓN LÓGICA (Evaluando tu value="informe")
+                const valTipo = selectTipoReporte ? String(selectTipoReporte.value).toLowerCase().trim() : "";
+                
+                if (valTipo === "informe") {
                     const optTodos = document.createElement("option");
                     optTodos.value = "TODOS";
                     optTodos.textContent = "⭐ Toda la jornada (Todas las actividades)";
@@ -432,28 +435,56 @@ async function ejecutarGeneracionPorFiltros() {
     }
 }
 
-// 4. GENERACIÓN DE ANEXOS 1-A, 1-B, 1-C
-function generarAnexosCenso(datosUnificados, fInit, fEnd) {
+function generarAnexosCenso(datosUnificados, fInit, fEnd, identificadorSeleccionado) {
     const grupos = { "1-A": [], "1-B": [], "1-C": [] };
+    
+    // ==========================================
+    // 1. EXTRACCIÓN ROBUSTA DEL DOM (Scope Binding)
+    // ==========================================
+    let selectDOM = document.getElementById("identificadorReporte");
+    // Forzamos la lectura en tiempo real de la UI para garantizar que capturamos lo que el usuario ve
+    let idModulo = identificadorSeleccionado || (selectDOM ? selectDOM.value : "");
+    idModulo = String(idModulo).trim();
+
+    // ==========================================
+    // 2. ITERACIÓN CON NORMALIZACIÓN DE LLAVES Y CANDADO
+    // ==========================================
     datosUnificados.forEach(f => {
+        // Acceso directo con fallback multidimensional para evitar errores de Case Sensitivity de Google Sheets
+        let valLugar = f["Lugar_Fijo"] || f["lugar_fijo"] || buscarDato(f, "Lugar_Fijo") || buscarDato(f, "lugar_fijo") || "";
+        let lugarFijo = String(valLugar).trim();
+        
+        // CANDADO: Si se especificó un módulo distinto a "TODOS" y el registro no coincide, abortamos.
+        if (idModulo !== "" && idModulo !== "TODOS" && lugarFijo !== idModulo) {
+            return; // Early return: descarta a este paciente y pasa al siguiente
+        }
+
         let nombrePaciente = buscarDato(f, "quien recibe atencion") || buscarDato(f, "nombre del paciente");
         
         if (!nombrePaciente || String(nombrePaciente).trim() === "") {
             return; 
         }
+        
         let catEdad = String(buscarDato(f, "tipo de vacunacion")).toLowerCase();
         let tipo = (catEdad.includes("0 a 9") || catEdad.includes("infante")) ? "1-A" : (catEdad.includes("10 a 19") || catEdad.includes("adolescente")) ? "1-B" : "1-C";
         grupos[tipo].push(f);
     });
     
     let labelRango = fInit === fEnd ? fInit : `${fInit}_al_${fEnd}`;
+    
+    // 3. GENERACIÓN DEL SUFIJO PARA EL ARCHIVO
+    // Evita que los PDFs de distintos módulos se sobreescriban al descargarse el mismo día
+    let sufijoId = (idModulo !== "" && idModulo !== "TODOS") ? `_${idModulo}` : "";
+
     Object.keys(grupos).forEach(tipo => {
-        if (grupos[tipo].length > 0) procesarAnexoBase(tipo, grupos[tipo], fInit, fEnd, labelRango);
+        // Pasamos el nuevo parámetro 'sufijoId' a la función base
+        if (grupos[tipo].length > 0) procesarAnexoBase(tipo, grupos[tipo], fInit, fEnd, labelRango, sufijoId);
     });
+    
     alert("✅ Anexos generados correctamente.");
 }
 
-function procesarAnexoBase(tipo, datos, fInit, fEnd, labelRango) {
+function procesarAnexoBase(tipo, datos, fInit, fEnd, labelRango, sufijoId = "") {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF('l', 'pt', 'legal');
     const esquema = ESQUEMAS[tipo];
@@ -604,7 +635,7 @@ function procesarAnexoBase(tipo, datos, fInit, fEnd, labelRango) {
         },
         addPageContent: (data) => dibujarFormatoBase(doc, data, tipo)
     });
-    doc.save(`Anexo_${tipo}_${labelRango}.pdf`);
+    doc.save(`Anexo_${tipo}_${labelRango}${sufijoId}.pdf`);
 }
 
 function dibujarFormatoBase(doc, data, tipo) {
@@ -652,7 +683,7 @@ function dibujarFormatoBase(doc, data, tipo) {
 // ==========================================
 // 5. INFORME FINAL (Resumen)
 // ==========================================
-function generarInformeActividad(datosUnificados, fInit, fEnd) {
+function generarInformeActividad(datosUnificados, fInit, fEnd, identificadorSeleccionado) {
     // 1. Inicialización de contadores en 0
     let stats = { 
         fechaJornada: fInit === fEnd ? fInit : `${fInit} a ${fEnd}`, 
@@ -663,9 +694,27 @@ function generarInformeActividad(datosUnificados, fInit, fEnd) {
         grupos: { "1-A": 0, "1-B": 0, "1-C": 0 }, 
         vacunasDetalle: {} 
     };
-    
+
+    // ==========================================
+    // CAPTURA DEL CONTEXTO (Bypass Condicional)
+    // ==========================================
+    let selectDOM = document.getElementById("identificadorReporte");
+    let idModulo = identificadorSeleccionado || (selectDOM ? selectDOM.value : "");
+    idModulo = String(idModulo).trim();
+
     // 2. Poblado Matemático con Escudos
     datosUnificados.forEach(f => {
+        // ==========================================
+        // ESCUDO 0: Filtro Estricto de Módulo vs Bypass "TODOS"
+        // ==========================================
+        let valLugar = f["Lugar_Fijo"] || f["lugar_fijo"] || buscarDato(f, "Lugar_Fijo") || buscarDato(f, "lugar_fijo") || "";
+        let lugarFijo = String(valLugar).trim();
+        
+        // Si no es "TODOS" y no coincide con el módulo, se ignora por completo este registro
+        if (idModulo !== "" && idModulo !== "TODOS" && lugarFijo !== idModulo) {
+            return; 
+        }
+
         let historial = f._historialVacunas || [];
         
         if (historial.length === 0) return; // ESCUDO 1: Ignora pacientes sin vacunas
@@ -747,9 +796,13 @@ function generarInformeActividad(datosUnificados, fInit, fEnd) {
 
     doc.setFontSize(14); doc.setFont(undefined, 'bold'); doc.setTextColor(159, 34, 65);
     doc.text(`GRAN TOTAL DE DOSIS HOY: ${stats.totalDoses}`, 40, doc.lastAutoTable.finalY + 40);
-    doc.save(`Informe_Jornada_${stats.fechaJornada}.pdf`);
+    
+    // Nombramiento dinámico para evitar sobreescribir archivos
+    let sufijoId = (idModulo !== "" && idModulo !== "TODOS") ? `_${idModulo}` : "_TODOS";
+    doc.save(`Informe_Jornada_${stats.fechaJornada}${sufijoId}.pdf`);
+    
     alert("✅ Informe generado.");
-} 
+}
 
 // ==========================================
 // 6. REPORTE: ACCIONES REALIZADAS EN BLOQUEO VACUNAL
