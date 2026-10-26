@@ -59,6 +59,123 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // ==========================================
+    // 2.5 LÓGICA DE SELECTS EN CASCADA (Año -> Mes -> Día)
+    // ==========================================
+    const selectAnio = document.getElementById("filtro-anio");
+    const selectMes = document.getElementById("filtro-mes");
+    const selectDia = document.getElementById("filtro-dia");
+    // El input oculto que recibe la fecha final
+    const inputFechaProxy = document.getElementById("filtro-fecha-inicio") || document.getElementById("fechaReporte");
+
+    let cacheCensoFechas = []; // Almacenará los datos para evitar múltiples llamadas al servidor
+
+    async function inicializarFechasCascada() {
+        if (!selectAnio) return;
+        
+        try {
+            const datosBD = await obtenerDatosDesdeGoogle();
+            if (!datosBD || !datosBD.censo) {
+                selectAnio.innerHTML = '<option value="">Error de datos</option>';
+                return;
+            }
+            
+            cacheCensoFechas = datosBD.censo;
+
+            // Extraer todas las fechas de actividad (Formato esperado de tu BD: DD/MM/YYYY)
+            const fechasCrudas = cacheCensoFechas.map(p => String(buscarDato(p, "fecha de la actividad")).trim()).filter(f => f.includes("/"));
+            
+            // Extraer Años Únicos
+            const anios = [...new Set(fechasCrudas.map(f => f.split("/")[2]))].sort((a, b) => b - a); // Orden descendente
+
+            selectAnio.innerHTML = '<option value="">Seleccione Año...</option>';
+            anios.forEach(a => {
+                const opt = document.createElement("option"); opt.value = a; opt.textContent = a; selectAnio.appendChild(opt);
+            });
+
+        } catch (error) {
+            console.error("Error cargando fechas:", error);
+            selectAnio.innerHTML = '<option value="">Error de conexión</option>';
+        }
+    }
+
+    if (selectAnio) {
+        // Ejecutar carga inicial
+        inicializarFechasCascada();
+
+        // EVENTO 1: Al seleccionar el Año, poblar los Meses
+        selectAnio.addEventListener("change", (e) => {
+            const anioSeleccionado = e.target.value;
+            selectMes.innerHTML = '<option value="">Seleccione Mes...</option>';
+            selectDia.innerHTML = '<option value="">Seleccione Día...</option>';
+            selectMes.disabled = true; selectDia.disabled = true;
+            inputFechaProxy.value = ""; // Limpiar proxy
+
+            if (!anioSeleccionado) return;
+
+            // Nombres de meses para UI
+            const nombresMeses = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+
+            const fechasCrudas = cacheCensoFechas.map(p => String(buscarDato(p, "fecha de la actividad")).trim());
+            const mesesDelAnio = [...new Set(fechasCrudas
+                .filter(f => f.endsWith(`/${anioSeleccionado}`)) // Filtra por el año
+                .map(f => f.split("/")[1]) // Extrae el mes (MM)
+            )].sort((a, b) => a - b); // Orden ascendente
+
+            mesesDelAnio.forEach(m => {
+                const opt = document.createElement("option"); 
+                opt.value = m; 
+                opt.textContent = `${m} - ${nombresMeses[parseInt(m) - 1]}`; 
+                selectMes.appendChild(opt);
+            });
+            selectMes.disabled = false;
+        });
+
+        // EVENTO 2: Al seleccionar el Mes, poblar los Días
+        selectMes.addEventListener("change", (e) => {
+            const mesSeleccionado = e.target.value;
+            const anioSeleccionado = selectAnio.value;
+            
+            selectDia.innerHTML = '<option value="">Seleccione Día...</option>';
+            selectDia.disabled = true;
+            inputFechaProxy.value = ""; // Limpiar proxy
+
+            if (!mesSeleccionado) return;
+
+            const sufijoBusqueda = `${mesSeleccionado.padStart(2, '0')}/${anioSeleccionado}`;
+            const fechasCrudas = cacheCensoFechas.map(p => String(buscarDato(p, "fecha de la actividad")).trim());
+            
+            const diasDelMes = [...new Set(fechasCrudas
+                .filter(f => f.endsWith(sufijoBusqueda))
+                .map(f => f.split("/")[0]) // Extrae el día (DD)
+            )].sort((a, b) => a - b);
+
+            diasDelMes.forEach(d => {
+                const opt = document.createElement("option"); opt.value = d; opt.textContent = d; selectDia.appendChild(opt);
+            });
+            selectDia.disabled = false;
+        });
+
+        // EVENTO 3: Al seleccionar el Día, inyectar en el Proxy y disparar la lógica original
+        selectDia.addEventListener("change", (e) => {
+            const diaSeleccionado = e.target.value;
+            if (!diaSeleccionado) {
+                inputFechaProxy.value = "";
+                return;
+            }
+
+            // Construir formato ISO YYYY-MM-DD para el input proxy
+            const anio = selectAnio.value;
+            const mes = selectMes.value.padStart(2, '0');
+            const dia = diaSeleccionado.padStart(2, '0');
+            
+            inputFechaProxy.value = `${anio}-${mes}-${dia}`;
+            
+            // Disparar el evento artificialmente para que el bloque 3 (Identificadores) se ejecute
+            inputFechaProxy.dispatchEvent(new Event("change"));
+        });
+    }
+
+    // ==========================================
     // 3. POBLACIÓN DINÁMICA DE IDENTIFICADORES Y BYPASS
     // ==========================================
     if (inputFecha && selectIdentificador) {

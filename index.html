@@ -69,9 +69,28 @@
                     <option value="">-- Seleccione un Caso --</option>
                 </select>
             </div>
-            <div class="grupo-filtro">
-                <label for="fechaReporte">Fecha de la actividad:</label>
-                <input type="date" id="fechaReporte" class="input-control">
+            <!-- INTERVENCIÓN: Filtros de Fecha en Cascada -->
+            <div class="filtro-grupo" id="contenedorFecha" style="display: flex; gap: 10px; align-items: center;">
+                <div>
+                    <label for="filtro-anio">Año</label>
+                    <select id="filtro-anio" class="form-control" required>
+                        <option value="">Cargando...</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filtro-mes">Mes</label>
+                    <select id="filtro-mes" class="form-control" disabled required>
+                        <option value="">Seleccione...</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="filtro-dia">Día</label>
+                    <select id="filtro-dia" class="form-control" disabled required>
+                        <option value="">Seleccione...</option>
+                    </select>
+                </div>
+                <!-- Input Oculto (Proxy) para mantener compatibilidad con el resto del script -->
+                <input type="hidden" id="filtro-fecha-inicio">
             </div>
 
             <div class="grupo-filtro">
